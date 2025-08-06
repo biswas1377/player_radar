@@ -1,0 +1,25 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "shell",
+			"label": "Start Backend (Express.js)",
+			"command": "cd server; npm start",
+			"group": "build",
+			"isBackground": true,
+			"problemMatcher": []
+		}
+		,
+		{
+			"type": "shell",
+			"label": "Start Frontend (React)",
+			"command": "npm start",
+			"group": "build",
+			"isBackground": true,
+			"problemMatcher": [],
+			"options": {
+				"cwd": "${workspaceFolder}/client"
+			}
+		}
+	]
+}
