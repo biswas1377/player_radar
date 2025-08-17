@@ -1,5 +1,11 @@
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+
+// JWT Secret - must be set in environment variables for security
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('SECURITY WARNING: JWT_SECRET environment variable is not set!');
+  process.exit(1);
+}
 
 module.exports = (req, res, next) => {
   const auth = req.headers.authorization;

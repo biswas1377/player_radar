@@ -12,6 +12,27 @@ router.get('/', function(req, res, next) {
 // PATCH route for player to update their own profile (MUST be before GET /api/players)
 router.patch('/api/players/:name', auth, playerController.updatePlayer);
 
+// Video highlights routes (MUST be before general /api/players routes)
+router.post('/api/players/video-highlights', auth, playerController.uploadVideoHighlight, playerController.addVideoHighlight);
+router.delete('/api/players/video-highlights/:videoId', auth, playerController.deleteVideoHighlight);
+router.get('/api/players/:playerName/video-highlights', playerController.getVideoHighlights);
+
+// Match photos routes (MUST be before general /api/players routes)
+router.post('/api/players/match-photos', (req, res, next) => {
+  console.log('📷 Match photo upload route hit');
+  next();
+}, auth, playerController.uploadMatchPhoto, playerController.addMatchPhoto);
+router.delete('/api/players/match-photos/:photoId', auth, playerController.deleteMatchPhoto);
+router.get('/api/players/:playerName/match-photos', (req, res, next) => {
+  console.log('📷 Match photos GET route hit for player:', req.params.playerName);
+  next();
+}, playerController.getMatchPhotos);
+
+// Notes routes (MUST be before general /api/players routes)
+router.post('/api/players/:playerName/notes', auth, playerController.addNote);
+router.delete('/api/players/:playerName/notes/:noteId', auth, playerController.removeNote);
+router.get('/api/players/:playerName/notes', playerController.getNotes);
+
 // Add logging middleware to see what requests are being made
 router.use('/api/players*', (req, res, next) => {
   console.log(`🔍 Request: ${req.method} ${req.originalUrl} - Params:`, req.params);

@@ -1,4 +1,73 @@
 const Player = require('../models/Player');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+
+// Configure multer for video uploads
+const videoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'public/uploads/video-highlights/';
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'highlight-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const videoUpload = multer({
+  storage: videoStorage,
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB limit for videos
+  },
+  fileFilter: function (req, file, cb) {
+    // Check file type for videos
+    if (file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are allowed!'), false);
+    }
+  }
+});
+
+exports.uploadVideoHighlight = videoUpload.single('videoHighlight');
+
+// Configure multer for photo uploads
+const photoStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadDir = 'public/uploads/match-photos/';
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'match-photo-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const photoUpload = multer({
+  storage: photoStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit for photos
+  },
+  fileFilter: function (req, file, cb) {
+    // Check file type for images
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  }
+});
+
+exports.uploadMatchPhoto = photoUpload.single('matchPhoto');
 
 // Update player profile (player can edit their own details)
 exports.updatePlayer = async (req, res) => {
@@ -40,7 +109,7 @@ exports.getPlayers = async (req, res) => {
   try {
     let players;
     
-    // If user is a scout, show only players they personally added + legacy system players
+    // If user is a scout, show players added by any scout from their club + legacy system players
     if (req.user && req.user.role === 'scout') {
       // Check if scout has club information
       if (!req.user.club) {
@@ -48,10 +117,15 @@ exports.getPlayers = async (req, res) => {
         return res.status(400).json({ error: 'User club information missing. Please log out and log back in.' });
       }
       
-      // Get players added by this scout OR legacy system players from their club
+      // Get all scouts from the same club
+      const User = require('../models/User');
+      const scoutsFromClub = await User.find({ role: 'scout', club: req.user.club });
+      const scoutUsernames = scoutsFromClub.map(scout => scout.username);
+      
+      // Get players added by any scout from the same club OR legacy system players from their club
       players = await Player.find({ 
         $or: [
-          { addedBy: req.user.username },
+          { addedBy: { $in: scoutUsernames } },
           { addedBy: 'system', club: req.user.club }
         ]
       });
@@ -212,5 +286,313 @@ exports.deletePlayer = async (req, res) => {
   } catch (err) {
     console.error('Delete player error:', err);
     res.status(500).json({ error: 'Failed to delete player' });
+  }
+};
+
+// Upload video highlight (player only)
+exports.addVideoHighlight = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'player') {
+      return res.status(403).json({ error: 'Only players can upload video highlights' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No video file uploaded' });
+    }
+
+    const { description } = req.body;
+    const username = req.user.username;
+
+    const videoData = {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      description: description || '',
+      uploadDate: new Date()
+    };
+
+    const player = await Player.addVideoHighlight(username, videoData);
+    
+    if (!player) {
+      // Clean up uploaded file if player not found
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Player profile not found' });
+    }
+
+    res.json({ 
+      message: 'Video highlight uploaded successfully',
+      video: videoData
+    });
+
+  } catch (err) {
+    // Clean up uploaded file on error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.error('Upload video highlight error:', err);
+    res.status(500).json({ error: 'Failed to upload video highlight' });
+  }
+};
+
+// Delete video highlight (player only)
+exports.deleteVideoHighlight = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'player') {
+      return res.status(403).json({ error: 'Only players can delete their video highlights' });
+    }
+
+    const { videoId } = req.params;
+    const username = req.user.username;
+
+    // First get the player to find the video file
+    const player = await Player.findByNameCaseInsensitive(username);
+    if (!player) {
+      return res.status(404).json({ error: 'Player profile not found' });
+    }
+
+    // Find the video to get filename for deletion
+    const video = player.videoHighlights.find(v => v._id.toString() === videoId);
+    if (!video) {
+      return res.status(404).json({ error: 'Video highlight not found' });
+    }
+
+    // Remove video from database
+    const updatedPlayer = await Player.removeVideoHighlight(username, videoId);
+    
+    // Delete physical file
+    const filePath = path.join('public/uploads/video-highlights/', video.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    res.json({ 
+      message: 'Video highlight deleted successfully',
+      deletedVideo: video
+    });
+
+  } catch (err) {
+    console.error('Delete video highlight error:', err);
+    res.status(500).json({ error: 'Failed to delete video highlight' });
+  }
+};
+
+// Get video highlights for a player
+exports.getVideoHighlights = async (req, res) => {
+  try {
+    const { playerName } = req.params;
+    
+    const player = await Player.findByNameCaseInsensitive(playerName);
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    res.json({
+      playerName: player.name,
+      videoHighlights: player.videoHighlights || []
+    });
+
+  } catch (err) {
+    console.error('Get video highlights error:', err);
+    res.status(500).json({ error: 'Failed to fetch video highlights' });
+  }
+};
+
+// Upload match photo (player only)
+exports.addMatchPhoto = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'player') {
+      return res.status(403).json({ error: 'Only players can upload match photos' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No photo file uploaded' });
+    }
+
+    const { description, matchDate, opponent } = req.body;
+    const username = req.user.username;
+
+    const photoData = {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      description: description || '',
+      matchDate: matchDate || new Date().toISOString().split('T')[0],
+      opponent: opponent || '',
+      uploadDate: new Date()
+    };
+
+    const player = await Player.addMatchPhoto(username, photoData);
+    
+    if (!player) {
+      // Clean up uploaded file if player not found
+      fs.unlinkSync(req.file.path);
+      return res.status(404).json({ error: 'Player profile not found' });
+    }
+
+    res.json({ 
+      message: 'Match photo uploaded successfully',
+      photo: photoData
+    });
+
+  } catch (err) {
+    // Clean up uploaded file on error
+    if (req.file) {
+      fs.unlinkSync(req.file.path);
+    }
+    console.error('Upload match photo error:', err);
+    res.status(500).json({ error: 'Failed to upload match photo' });
+  }
+};
+
+// Delete match photo (player only)
+exports.deleteMatchPhoto = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'player') {
+      return res.status(403).json({ error: 'Only players can delete their match photos' });
+    }
+
+    const { photoId } = req.params;
+    const username = req.user.username;
+
+    // First get the player to find the photo file
+    const player = await Player.findByNameCaseInsensitive(username);
+    if (!player) {
+      return res.status(404).json({ error: 'Player profile not found' });
+    }
+
+    // Find the photo to get filename for deletion
+    const photo = player.matchPhotos?.find(p => p._id.toString() === photoId);
+    if (!photo) {
+      return res.status(404).json({ error: 'Match photo not found' });
+    }
+
+    // Remove photo from database
+    const updatedPlayer = await Player.removeMatchPhoto(username, photoId);
+    
+    // Delete physical file
+    const filePath = path.join('public/uploads/match-photos/', photo.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    res.json({ 
+      message: 'Match photo deleted successfully',
+      deletedPhoto: photo
+    });
+
+  } catch (err) {
+    console.error('Delete match photo error:', err);
+    res.status(500).json({ error: 'Failed to delete match photo' });
+  }
+};
+
+// Get match photos for a player
+exports.getMatchPhotos = async (req, res) => {
+  try {
+    const { playerName } = req.params;
+    
+    const player = await Player.findByNameCaseInsensitive(playerName);
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    res.json({
+      playerName: player.name,
+      matchPhotos: player.matchPhotos || []
+    });
+
+  } catch (err) {
+    console.error('Get match photos error:', err);
+    res.status(500).json({ error: 'Failed to fetch match photos' });
+  }
+};
+
+// Add a note to a player (only scouts can add notes)
+exports.addNote = async (req, res) => {
+  try {
+    const { playerName } = req.params;
+    const { content } = req.body;
+    const scoutUsername = req.user.username; // From JWT token
+
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ error: 'Note content is required' });
+    }
+
+    const noteData = {
+      content: content.trim(),
+      addedBy: scoutUsername,
+      timestamp: new Date()
+    };
+
+    const updatedPlayer = await Player.addNote(playerName, noteData);
+    if (!updatedPlayer) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    res.json({ 
+      message: 'Note added successfully',
+      note: noteData
+    });
+
+  } catch (err) {
+    console.error('Add note error:', err);
+    res.status(500).json({ error: 'Failed to add note' });
+  }
+};
+
+// Remove a note from a player
+exports.removeNote = async (req, res) => {
+  try {
+    const { playerName, noteId } = req.params;
+    const scoutUsername = req.user.username; // From JWT token
+
+    const player = await Player.findByNameCaseInsensitive(playerName);
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    // Find the note to check ownership
+    const note = player.notes.id(noteId);
+    if (!note) {
+      return res.status(404).json({ error: 'Note not found' });
+    }
+
+    // Only the scout who added the note can remove it
+    if (note.addedBy !== scoutUsername) {
+      return res.status(403).json({ error: 'You can only delete your own notes' });
+    }
+
+    const updatedPlayer = await Player.removeNote(playerName, noteId);
+
+    res.json({ 
+      message: 'Note deleted successfully',
+      deletedNote: note
+    });
+
+  } catch (err) {
+    console.error('Remove note error:', err);
+    res.status(500).json({ error: 'Failed to delete note' });
+  }
+};
+
+// Get notes for a player
+exports.getNotes = async (req, res) => {
+  try {
+    const { playerName } = req.params;
+    
+    const player = await Player.findByNameCaseInsensitive(playerName);
+    if (!player) {
+      return res.status(404).json({ error: 'Player not found' });
+    }
+
+    // Sort notes by timestamp (newest first)
+    const sortedNotes = (player.notes || []).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    res.json({
+      playerName: player.name,
+      notes: sortedNotes
+    });
+
+  } catch (err) {
+    console.error('Get notes error:', err);
+    res.status(500).json({ error: 'Failed to fetch notes' });
   }
 };

@@ -4,7 +4,12 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+// JWT Secret - must be set in environment variables for security
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('SECURITY WARNING: JWT_SECRET environment variable is not set!');
+  process.exit(1);
+}
 
 // Configure multer for profile picture uploads
 const storage = multer.diskStorage({

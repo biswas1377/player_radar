@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import './App.css';
 import LoginTemplate from './LoginTemplate';
+import VideoHighlights from './VideoHighlights';
+import VideoManagement from './VideoManagement';
+import PhotoManagement from './PhotoManagement';
 
 function PlayerForm({ onAdd }) {
   const [form, setForm] = useState({
@@ -101,6 +104,8 @@ function App() {
   const [sortOrder, setSortOrder] = useState('asc');
   // For player profile
   const [profile, setProfile] = useState(null);
+  const [playerNotes, setPlayerNotes] = useState([]);
+  const [loadingPlayerNotes, setLoadingPlayerNotes] = useState(false);
   // For player edit mode
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -117,6 +122,10 @@ function App() {
   const [uploadingPicture, setUploadingPicture] = useState(false);
   const [pictureUploadError, setPictureUploadError] = useState('');
   const [enlargedImage, setEnlargedImage] = useState(null); // For image modal
+  // For video counts in player list
+  const [playerVideoCounts, setPlayerVideoCounts] = useState({});
+  // For photo counts in player list
+  const [playerPhotoCounts, setPlayerPhotoCounts] = useState({});
 
   // Helper function to calculate age from date of birth
   const calculateAge = (dob) => {
@@ -253,10 +262,67 @@ function App() {
         }
       })
         .then(res => res.ok ? res.json() : Promise.reject())
-        .then(data => setPlayers(data))
+        .then(data => {
+          setPlayers(data);
+          // Fetch video and photo counts for scout users
+          if (user.role === 'scout') {
+            fetchVideoCountsForPlayers(data);
+            fetchPhotoCountsForPlayers(data);
+          }
+        })
         .catch(() => setPlayers([]));
     }
   }, [user, page]);
+
+  // Fetch video counts for all players (scout only)
+  const fetchVideoCountsForPlayers = async (playersData) => {
+    const counts = {};
+    try {
+      await Promise.all(
+        playersData.map(async (player) => {
+          try {
+            const response = await fetch(`/api/players/${player.name}/video-highlights`);
+            if (response.ok) {
+              const data = await response.json();
+              counts[player._id] = data.videoHighlights?.length || 0;
+            } else {
+              counts[player._id] = 0;
+            }
+          } catch {
+            counts[player._id] = 0;
+          }
+        })
+      );
+      setPlayerVideoCounts(counts);
+    } catch (err) {
+      console.error('Failed to fetch video counts:', err);
+    }
+  };
+
+  // Fetch photo counts for all players (scout only)
+  const fetchPhotoCountsForPlayers = async (playersData) => {
+    const counts = {};
+    try {
+      await Promise.all(
+        playersData.map(async (player) => {
+          try {
+            const response = await fetch(`/api/players/${player.name}/match-photos`);
+            if (response.ok) {
+              const data = await response.json();
+              counts[player._id] = data.matchPhotos?.length || 0;
+            } else {
+              counts[player._id] = 0;
+            }
+          } catch {
+            counts[player._id] = 0;
+          }
+        })
+      );
+      setPlayerPhotoCounts(counts);
+    } catch (err) {
+      console.error('Failed to fetch photo counts:', err);
+    }
+  };
 
   // Fetch player profile if user is a player
   useEffect(() => {
@@ -271,18 +337,22 @@ function App() {
           const found = data.find(p => p.name.toLowerCase() === user.username.toLowerCase());
           if (found) {
             setProfile(found);
+            // Also fetch notes for this player
+            fetchPlayerNotes();
           } else {
             // Player record doesn't exist - log out the user
             console.warn('Player record not found for user:', user.username);
             localStorage.removeItem('token');
             setUser(null);
             setProfile(null);
+            setPlayerNotes([]);
             setPage('auth');
             alert('Your player profile has been removed. Please contact an administrator.');
           }
         })
         .catch(() => {
           setProfile(null);
+          setPlayerNotes([]);
           // Also log out if there's an error fetching players
           localStorage.removeItem('token');
           setUser(null);
@@ -290,8 +360,28 @@ function App() {
         });
     } else {
       setProfile(null);
+      setPlayerNotes([]);
     }
   }, [user]);
+
+  // Fetch player notes
+  const fetchPlayerNotes = async () => {
+    if (!user || user.role !== 'player') return;
+    
+    setLoadingPlayerNotes(true);
+    try {
+      const response = await fetch(`/api/players/${user.username}/notes`);
+      if (response.ok) {
+        const data = await response.json();
+        setPlayerNotes(data.notes || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch player notes:', err);
+      setPlayerNotes([]);
+    } finally {
+      setLoadingPlayerNotes(false);
+    }
+  };
 
   // Keep edit form in sync with profile
   useEffect(() => {
@@ -482,11 +572,10 @@ function App() {
       <div className="football-bg" style={{
         background: `linear-gradient(135deg, rgba(10,10,10,0.1) 60%, rgba(34,34,34,0.2) 100%), url(${process.env.PUBLIC_URL}/santi-cazorla.jpg) no-repeat center center fixed`,
         backgroundSize: 'cover, cover',
-        height: '100vh',
-        overflow: 'hidden',
+        minHeight: '100vh',
         padding: 12
       }}>
-        <div style={{background: 'linear-gradient(135deg, #DC143C 0%, #ff4d6d 15%, #ffffff 40%, #ffebec 60%, #ffffff 85%, #DC143C 100%)', borderRadius: 12, boxShadow: '0 8px 32px rgba(220,20,60,0.25)', padding: 16, width: '100%', height: 'calc(100vh - 24px)', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden'}}>
+        <div style={{background: 'linear-gradient(135deg, #DC143C 0%, #ff4d6d 15%, #ffffff 40%, #ffebec 60%, #ffffff 85%, #DC143C 100%)', borderRadius: 12, boxShadow: '0 8px 32px rgba(220,20,60,0.25)', padding: 16, width: '100%', minHeight: 'calc(100vh - 24px)', display: 'flex', flexDirection: 'column', position: 'relative'}}>
           {/* Decorative background elements */}
           <div style={{position: 'absolute', top: -50, right: -50, width: 200, height: 200, background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)', borderRadius: '50%'}}></div>
           <div style={{position: 'absolute', bottom: -30, left: -30, width: 150, height: 150, background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%)', borderRadius: '50%'}}></div>
@@ -592,8 +681,8 @@ function App() {
             </div>
           </div>
           
-          <div style={{flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column'}}>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, height: '100%', position: 'relative', zIndex: 1}}>
+          <div style={{flex: 1, display: 'flex', flexDirection: 'column'}}>
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, minHeight: '400px', position: 'relative', zIndex: 1}}>
               <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', border: '2px solid rgba(220,20,60,0.2)'}}>
                 <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 6}}>Recent Activity</div>
                 <div style={{flex: 1, display: 'flex', flexDirection: 'column', gap: 8}}>
@@ -705,7 +794,7 @@ function App() {
         overflow: 'hidden',
         padding: 12
       }}>
-        <div style={{background: 'linear-gradient(135deg, #ffffff 0%, #ffeff0 25%, #ffffff 50%, #fff5f5 75%, #ffffff 100%)', borderRadius: 12, boxShadow: '0 8px 32px rgba(220,20,60,0.15)', padding: 16, width: '100%', height: 'calc(100vh - 24px)', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden'}}>
+        <div style={{background: 'linear-gradient(135deg, #ffffff 0%, #ffeff0 25%, #ffffff 50%, #fff5f5 75%, #ffffff 100%)', borderRadius: 12, boxShadow: '0 8px 32px rgba(220,20,60,0.15)', padding: 16, width: '100%', minHeight: 'calc(100vh - 24px)', display: 'flex', flexDirection: 'column', position: 'relative'}}>
           {/* Decorative background elements */}
           <div style={{position: 'absolute', top: -30, right: -30, width: 120, height: 120, background: 'radial-gradient(circle, rgba(220,20,60,0.04) 0%, transparent 70%)', borderRadius: '50%'}}></div>
           <div style={{position: 'absolute', bottom: -20, left: -20, width: 100, height: 100, background: 'radial-gradient(circle, rgba(6,54,114,0.03) 0%, transparent 70%)', borderRadius: '50%'}}></div>
@@ -741,6 +830,26 @@ function App() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Video Management page (for players only)
+  if (user && user.role === 'player' && page === 'video-management') {
+    return (
+      <VideoManagement 
+        user={user} 
+        onBack={() => setPage('player-dashboard')} 
+      />
+    );
+  }
+
+  // Photo Management page (for players only)
+  if (user && user.role === 'player' && page === 'photo-management') {
+    return (
+      <PhotoManagement 
+        user={user} 
+        onBack={() => setPage('player-dashboard')} 
+      />
     );
   }
 
@@ -828,11 +937,10 @@ function App() {
       <div className="football-bg" style={{
         background: `linear-gradient(135deg, rgba(10,10,10,0.1) 60%, rgba(34,34,34,0.2) 100%), url(${process.env.PUBLIC_URL}/santi-cazorla.jpg) no-repeat center center fixed`,
         backgroundSize: 'cover, cover',
-        height: '100vh',
-        overflow: 'hidden',
+        minHeight: '100vh',
         padding: 12
       }}>
-        <div style={{background: 'linear-gradient(135deg, #DC143C 0%, #ff4d6d 15%, #ffffff 40%, #ffebec 60%, #ffffff 85%, #DC143C 100%)', borderRadius: 12, boxShadow: '0 8px 32px rgba(220,20,60,0.25)', padding: 16, width: '100%', height: 'calc(100vh - 24px)', display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden'}}>
+        <div style={{background: 'linear-gradient(135deg, #DC143C 0%, #ff4d6d 15%, #ffffff 40%, #ffebec 60%, #ffffff 85%, #DC143C 100%)', borderRadius: 12, boxShadow: '0 8px 32px rgba(220,20,60,0.25)', padding: 16, width: '100%', minHeight: 'calc(100vh - 24px)', display: 'flex', flexDirection: 'column', position: 'relative'}}>
           {/* Decorative background elements */}
           <div style={{position: 'absolute', top: -40, right: -40, width: 150, height: 150, background: 'radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%)', borderRadius: '50%'}}></div>
           <div style={{position: 'absolute', bottom: -25, left: -25, width: 120, height: 120, background: 'radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%)', borderRadius: '50%'}}></div>
@@ -931,9 +1039,21 @@ function App() {
               <div style={{fontSize: 28, fontWeight: 700, color: '#ffffff', marginBottom: 4, textShadow: '0 2px 4px rgba(0,0,0,0.3)'}}>{profile?.name || user.username}</div>
               <div style={{fontSize: 18, color: 'rgba(255,255,255,0.9)', marginBottom: 12}}>{profile?.position || 'Player'}</div>
               {pictureUploadError && <div style={{color: '#ffcccf', fontSize: 12, marginBottom: 8}}>{pictureUploadError}</div>}
-              <div style={{display: 'flex', gap: 12}}>
+              <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
                 <button style={{background: 'rgba(255,255,255,0.9)', color: '#DC143C', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}}>Message</button>
                 <button style={{background: '#063672', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}} onClick={() => setEditMode(true)}>Edit Profile</button>
+                <button 
+                  onClick={() => setPage('video-management')}
+                  style={{background: '#ff6b35', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}}
+                >
+                  🎥 Manage Videos
+                </button>
+                <button 
+                  onClick={() => setPage('photo-management')}
+                  style={{background: '#8A2BE2', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}}
+                >
+                  📸 Manage Photos
+                </button>
                 <button style={{background: '#8B0000', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}}>Email</button>
               </div>
             </div>
@@ -983,8 +1103,8 @@ function App() {
             </div>
           ) : null}
           
-          <div style={{flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1}}>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, height: '100%'}}>
+          <div style={{flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1}}>
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, minHeight: '400px'}}>
               <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', border: '2px solid rgba(220,20,60,0.2)'}}>
                 <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 6}}>Player Details</div>
                 <div style={{flex: 1, display: 'flex', flexDirection: 'column', gap: 8}}>
@@ -1016,11 +1136,51 @@ function App() {
               </div>
               
               <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Performance Stats</div>
-                <div style={{width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(145deg, #ffffff 0%, #ffebec 100%)', border: '3px solid rgba(220,20,60,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: '0 4px 12px rgba(220,20,60,0.2)'}}>
-                  <span style={{fontSize: 32, color: '#DC143C'}}>📊</span>
+                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Video Highlights</div>
+                <div style={{width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(145deg, #ff6b35 0%, #ff4d20 100%)', border: '3px solid rgba(255,107,53,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: '0 4px 12px rgba(255,107,53,0.2)'}}>
+                  <span style={{fontSize: 32, color: '#fff'}}>🎥</span>
                 </div>
-                <div style={{fontSize: 12, color: '#666', textAlign: 'center'}}>Performance analytics<br/>coming soon</div>
+                <div style={{fontSize: 12, color: '#666', textAlign: 'center', marginBottom: 12}}>Showcase your skills<br/>Upload videos</div>
+                <button 
+                  onClick={() => setPage('video-management')}
+                  style={{
+                    background: '#ff6b35',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 6,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(255,107,53,0.3)'
+                  }}
+                >
+                  Manage Videos
+                </button>
+              </div>
+              
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
+                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Match Photos</div>
+                <div style={{width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(145deg, #8A2BE2 0%, #9A32F5 100%)', border: '3px solid rgba(138,43,226,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: '0 4px 12px rgba(138,43,226,0.2)'}}>
+                  <span style={{fontSize: 32, color: '#fff'}}>📸</span>
+                </div>
+                <div style={{fontSize: 12, color: '#666', textAlign: 'center', marginBottom: 12}}>Capture match moments<br/>Upload photos</div>
+                <button 
+                  onClick={() => setPage('photo-management')}
+                  style={{
+                    background: '#8A2BE2',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 6,
+                    padding: '6px 12px',
+                    fontSize: 12,
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 6px rgba(138,43,226,0.3)'
+                  }}
+                >
+                  Manage Photos
+                </button>
               </div>
               
               <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
@@ -1030,6 +1190,55 @@ function App() {
                 </div>
                 <div style={{fontSize: 12, color: '#666', textAlign: 'center'}}>Training schedule<br/>coming soon</div>
               </div>
+            </div>
+
+            {/* Notes Section for Player */}
+            <div style={{marginTop: 20, background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', border: '2px solid rgba(220,20,60,0.2)'}}>
+              <div style={{fontWeight: 700, color: '#228B22', marginBottom: 16, fontSize: 18, borderBottom: '2px solid rgba(34,139,34,0.2)', paddingBottom: 8}}>
+                📝 Scout Notes ({playerNotes.length})
+              </div>
+              
+              {loadingPlayerNotes ? (
+                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666'}}>
+                  <div>Loading notes...</div>
+                </div>
+              ) : playerNotes.length === 0 ? (
+                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666', textAlign: 'center'}}>
+                  <div>
+                    <div style={{fontSize: 32, marginBottom: 10}}>📝</div>
+                    <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Notes Yet</div>
+                    <div style={{fontSize: 14}}>No scout has added notes about you yet.</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '300px', overflowY: 'auto'}}>
+                  {playerNotes.map((note) => (
+                    <div
+                      key={note._id}
+                      style={{
+                        border: '1px solid rgba(34,139,34,0.2)',
+                        borderRadius: 8,
+                        padding: 16,
+                        background: '#fafafa'
+                      }}
+                    >
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8}}>
+                        <div>
+                          <div style={{fontWeight: 'bold', color: '#228B22', fontSize: 14}}>
+                            👤 Scout: {note.addedBy}
+                          </div>
+                          <div style={{fontSize: 12, color: '#666'}}>
+                            📅 {new Date(note.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{color: '#333', lineHeight: '1.5', fontSize: 14}}>
+                        {note.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1332,6 +1541,8 @@ function App() {
                   Weight {sortBy === 'weight' && (sortOrder === 'asc' ? '↑' : '↓')}
                 </th>
                 <th style={{padding: '12px 8px', border: '1px solid #ffcccf', fontWeight: 600}}>Foot</th>
+                <th style={{padding: '12px 8px', border: '1px solid #ffcccf', fontWeight: 600}}>Videos</th>
+                <th style={{padding: '12px 8px', border: '1px solid #ffcccf', fontWeight: 600}}>Photos</th>
                 <th style={{padding: '12px 8px', border: '1px solid #ffcccf', fontWeight: 600}}>Status</th>
                 {user && user.role === 'scout' && (
                   <th style={{padding: '12px 8px', border: '1px solid #ffcccf', fontWeight: 600}}>Actions</th>
@@ -1341,7 +1552,7 @@ function App() {
             <tbody>
               {getFilteredAndSortedPlayers().length === 0 ? (
                 <tr>
-                  <td colSpan={user && user.role === 'scout' ? "11" : "10"} style={{padding: '20px', textAlign: 'center', color: '#666', fontStyle: 'italic'}}>
+                  <td colSpan={user && user.role === 'scout' ? "13" : "12"} style={{padding: '20px', textAlign: 'center', color: '#666', fontStyle: 'italic'}}>
                     No players found matching your criteria
                   </td>
                 </tr>
@@ -1421,6 +1632,40 @@ function App() {
                       <td style={{padding: '12px 8px', border: '1px solid #ffcccf'}}>
                         {player.foot || 'N/A'}
                       </td>
+                      <td style={{padding: '12px 8px', border: '1px solid #ffcccf', textAlign: 'center'}}>
+                        {user.role === 'scout' ? (
+                          <span style={{
+                            background: (playerVideoCounts[player._id] || 0) > 0 ? '#e8f5e8' : '#fff3cd',
+                            color: (playerVideoCounts[player._id] || 0) > 0 ? '#2d5a2d' : '#856404',
+                            padding: '4px 8px',
+                            borderRadius: 12,
+                            fontSize: 12,
+                            fontWeight: 'bold',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}>
+                            🎥 {playerVideoCounts[player._id] || 0}
+                          </span>
+                        ) : 'N/A'}
+                      </td>
+                      <td style={{padding: '12px 8px', border: '1px solid #ffcccf', textAlign: 'center'}}>
+                        {user.role === 'scout' ? (
+                          <span style={{
+                            background: (playerPhotoCounts[player._id] || 0) > 0 ? '#f0e8ff' : '#fff3cd',
+                            color: (playerPhotoCounts[player._id] || 0) > 0 ? '#4b0082' : '#856404',
+                            padding: '4px 8px',
+                            borderRadius: 12,
+                            fontSize: 12,
+                            fontWeight: 'bold',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}>
+                            📷 {playerPhotoCounts[player._id] || 0}
+                          </span>
+                        ) : 'N/A'}
+                      </td>
                       <td style={{padding: '12px 8px', border: '1px solid #ffcccf'}}>
                         <span style={{
                           background: player.status === 'academy' ? '#e8f5e8' : player.status === 'scouting' ? '#fff3cd' : '#e8f5e8',
@@ -1471,11 +1716,157 @@ function App() {
 
   // Individual Player Profile page (for scouts viewing a specific player)
   if (user && user.role === 'scout' && page === 'player-profile' && selectedPlayer) {
+    return <ScoutPlayerProfileView />;
+  }
+
+  // Scout Player Profile View Component
+  function ScoutPlayerProfileView() {
+    const [playerVideos, setPlayerVideos] = useState([]);
+    const [loadingVideos, setLoadingVideos] = useState(false);
+    const [playerPhotos, setPlayerPhotos] = useState([]);
+    const [loadingPhotos, setLoadingPhotos] = useState(false);
+    const [selectedPhoto, setSelectedPhoto] = useState(null);
+    const [playerNotes, setPlayerNotes] = useState([]);
+    const [loadingNotes, setLoadingNotes] = useState(false);
+    const [noteContent, setNoteContent] = useState('');
+    const [addingNote, setAddingNote] = useState(false);
+
+    // Fetch player video highlights
+    useEffect(() => {
+      const fetchPlayerVideos = async () => {
+        if (!selectedPlayer?.name) return;
+        
+        setLoadingVideos(true);
+        try {
+          const response = await fetch(`/api/players/${selectedPlayer.name}/video-highlights`);
+          if (response.ok) {
+            const data = await response.json();
+            setPlayerVideos(data.videoHighlights || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch player videos:', err);
+          setPlayerVideos([]);
+        } finally {
+          setLoadingVideos(false);
+        }
+      };
+
+      fetchPlayerVideos();
+    }, [selectedPlayer]);
+
+    // Fetch player match photos
+    useEffect(() => {
+      const fetchPlayerPhotos = async () => {
+        if (!selectedPlayer?.name) return;
+        
+        setLoadingPhotos(true);
+        try {
+          const response = await fetch(`/api/players/${selectedPlayer.name}/match-photos`);
+          if (response.ok) {
+            const data = await response.json();
+            setPlayerPhotos(data.matchPhotos || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch player photos:', err);
+          setPlayerPhotos([]);
+        } finally {
+          setLoadingPhotos(false);
+        }
+      };
+
+      fetchPlayerPhotos();
+    }, [selectedPlayer]);
+
+    // Fetch player notes
+    useEffect(() => {
+      const fetchPlayerNotes = async () => {
+        if (!selectedPlayer?.name) return;
+        
+        setLoadingNotes(true);
+        try {
+          const response = await fetch(`/api/players/${selectedPlayer.name}/notes`);
+          if (response.ok) {
+            const data = await response.json();
+            setPlayerNotes(data.notes || []);
+          }
+        } catch (err) {
+          console.error('Failed to fetch player notes:', err);
+          setPlayerNotes([]);
+        } finally {
+          setLoadingNotes(false);
+        }
+      };
+
+      fetchPlayerNotes();
+    }, [selectedPlayer]);
+
+    // Add a new note
+    const handleAddNote = async () => {
+      if (!noteContent.trim()) return;
+      
+      setAddingNote(true);
+      try {
+        const response = await fetch(`/api/players/${selectedPlayer.name}/notes`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          },
+          body: JSON.stringify({ content: noteContent.trim() })
+        });
+
+        if (response.ok) {
+          // Refresh notes
+          const notesResponse = await fetch(`/api/players/${selectedPlayer.name}/notes`);
+          if (notesResponse.ok) {
+            const data = await notesResponse.json();
+            setPlayerNotes(data.notes || []);
+          }
+          setNoteContent('');
+        } else {
+          alert('Failed to add note');
+        }
+      } catch (err) {
+        console.error('Failed to add note:', err);
+        alert('Failed to add note');
+      } finally {
+        setAddingNote(false);
+      }
+    };
+
+    // Delete a note
+    const handleDeleteNote = async (noteId) => {
+      if (!confirm('Are you sure you want to delete this note?')) return;
+      
+      try {
+        const response = await fetch(`/api/players/${selectedPlayer.name}/notes/${noteId}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+
+        if (response.ok) {
+          // Refresh notes
+          const notesResponse = await fetch(`/api/players/${selectedPlayer.name}/notes`);
+          if (notesResponse.ok) {
+            const data = await notesResponse.json();
+            setPlayerNotes(data.notes || []);
+          }
+        } else {
+          alert('Failed to delete note');
+        }
+      } catch (err) {
+        console.error('Failed to delete note:', err);
+        alert('Failed to delete note');
+      }
+    };
+
     return (
       <div className="football-bg" style={{
         background: `linear-gradient(135deg, rgba(10,10,10,0.1) 60%, rgba(34,34,34,0.2) 100%), url(${process.env.PUBLIC_URL}/santi-cazorla.jpg) no-repeat center center fixed`,
         backgroundSize: 'cover, cover',
-        height: '100vh',
+        minHeight: '100vh',
         overflow: 'auto',
         padding: 12
       }}>
@@ -1499,7 +1890,7 @@ function App() {
                   {selectedPlayer.name}
                 </h1>
                 <p style={{margin: 0, color: 'rgba(255,255,255,0.9)', fontSize: 14, fontWeight: 600}}>
-                  Player Profile
+                  Player Profile • {playerVideos.length} Video{playerVideos.length !== 1 ? 's' : ''}
                 </p>
               </div>
             </div>
@@ -1527,136 +1918,477 @@ function App() {
           </div>
 
           {/* Player Profile Content */}
-          <div style={{flex: 1, display: 'flex', gap: 20, position: 'relative', zIndex: 1}}>
-            {/* Left Column - Player Info */}
-            <div style={{flex: 1, background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
-              <h2 style={{color: '#DC143C', fontSize: 20, marginBottom: 20, borderBottom: '2px solid #ffebec', paddingBottom: 10}}>
-                Player Information
-              </h2>
-              
-              <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 15}}>
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Full Name:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.name || 'N/A'}
-                  </p>
-                </div>
+          <div style={{flex: 1, display: 'flex', flexDirection: 'column', gap: 20, position: 'relative', zIndex: 1, overflow: 'auto'}}>
+            
+            {/* Top Row - Player Info and Photo */}
+            <div style={{display: 'flex', gap: 20, flexShrink: 0}}>
+              {/* Left Column - Player Info */}
+              <div style={{flex: 1, background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
+                <h2 style={{color: '#DC143C', fontSize: 20, marginBottom: 20, borderBottom: '2px solid #ffebec', paddingBottom: 10}}>
+                  Player Information
+                </h2>
                 
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Position:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.position || 'N/A'}
-                  </p>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 15}}>
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Full Name:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.name || 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Position:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.position || 'N/A'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Club:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.club || 'N/A'}
+                    </p>
+                  </div>
+
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Status:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: selectedPlayer.status === 'academy' ? '#e8f5e8' : '#fff3cd', border: '1px solid #e9ecef', borderRadius: 4, fontWeight: 'bold', color: selectedPlayer.status === 'academy' ? '#2d5a2d' : '#856404'}}>
+                      {selectedPlayer.status === 'academy' ? 'Academy Player' : selectedPlayer.status === 'scouting' ? 'Being Scouted' : 'Active'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Date of Birth:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.dob || 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Nationality:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.nationality || selectedPlayer.country || 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Height:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.height ? `${selectedPlayer.height} cm` : 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Weight:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.weight ? `${selectedPlayer.weight} kg` : 'N/A'}
+                    </p>
+                  </div>
+                  
+                  <div>
+                    <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Dominant Foot:</label>
+                    <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
+                      {selectedPlayer.foot || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column - Player Photo and Stats */}
+              <div style={{width: 300, display: 'flex', flexDirection: 'column', gap: 20}}>
+                {/* Player Photo */}
+                <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
+                  <h3 style={{color: '#DC143C', fontSize: 16, marginBottom: 15, textAlign: 'center'}}>Player Photo</h3>
+                  <div style={{
+                    width: '100%',
+                    height: 200,
+                    background: '#f8f9fa',
+                    border: '2px dashed #DC143C',
+                    borderRadius: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#666',
+                    fontSize: 14
+                  }}>
+                    {selectedPlayer.profilePicture ? (
+                      <img 
+                        src={selectedPlayer.profilePicture} 
+                        alt={selectedPlayer.name} 
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          borderRadius: 6
+                        }}
+                      />
+                    ) : (
+                      'No photo available'
+                    )}
+                  </div>
                 </div>
 
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Club:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.club || 'N/A'}
-                  </p>
-                </div>
-
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Status:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: selectedPlayer.status === 'academy' ? '#e8f5e8' : '#fff3cd', border: '1px solid #e9ecef', borderRadius: 4, fontWeight: 'bold', color: selectedPlayer.status === 'academy' ? '#2d5a2d' : '#856404'}}>
-                    {selectedPlayer.status === 'academy' ? 'Academy Player' : selectedPlayer.status === 'scouting' ? 'Being Scouted' : 'Active'}
-                  </p>
-                </div>
-                
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Date of Birth:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.dob || 'N/A'}
-                  </p>
-                </div>
-                
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Nationality:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.nationality || selectedPlayer.country || 'N/A'}
-                  </p>
-                </div>
-                
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Height:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.height ? `${selectedPlayer.height} cm` : 'N/A'}
-                  </p>
-                </div>
-                
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Weight:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.weight ? `${selectedPlayer.weight} kg` : 'N/A'}
-                  </p>
-                </div>
-                
-                <div>
-                  <label style={{display: 'block', fontWeight: 'bold', color: '#333', marginBottom: 5}}>Dominant Foot:</label>
-                  <p style={{margin: 0, padding: '8px 12px', background: '#f8f9fa', border: '1px solid #e9ecef', borderRadius: 4}}>
-                    {selectedPlayer.foot || 'N/A'}
-                  </p>
+                {/* Quick Stats */}
+                <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
+                  <h3 style={{color: '#DC143C', fontSize: 16, marginBottom: 15}}>Video Statistics</h3>
+                  <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e9ecef'}}>
+                      <span style={{fontWeight: 'bold', color: '#333'}}>Total Videos:</span>
+                      <span style={{color: '#666', fontWeight: 'bold'}}>{playerVideos.length}</span>
+                    </div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e9ecef'}}>
+                      <span style={{fontWeight: 'bold', color: '#333'}}>Latest Upload:</span>
+                      <span style={{color: '#666', fontSize: 12}}>
+                        {playerVideos.length > 0 
+                          ? new Date(Math.max(...playerVideos.map(v => new Date(v.uploadDate)))).toLocaleDateString()
+                          : 'N/A'
+                        }
+                      </span>
+                    </div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0'}}>
+                      <span style={{fontWeight: 'bold', color: '#333'}}>Profile Status:</span>
+                      <span style={{color: playerVideos.length > 0 ? '#2d5a2d' : '#856404', fontWeight: 'bold', fontSize: 12}}>
+                        {playerVideos.length > 0 ? '✅ Active' : '⚠️ No Videos'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Right Column - Player Photo and Stats */}
-            <div style={{width: 300, display: 'flex', flexDirection: 'column', gap: 20}}>
-              {/* Player Photo */}
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
-                <h3 style={{color: '#DC143C', fontSize: 16, marginBottom: 15, textAlign: 'center'}}>Player Photo</h3>
-                <div style={{
-                  width: '100%',
-                  height: 200,
-                  background: '#f8f9fa',
-                  border: '2px dashed #DC143C',
-                  borderRadius: 8,
+            {/* Bottom Row - Video Highlights and Match Photos */}
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20}}>
+              {/* Video Highlights Column */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', minHeight: '400px'}}>
+                <h2 style={{color: '#DC143C', fontSize: 18, marginBottom: 20, borderBottom: '2px solid #ffebec', paddingBottom: 10}}>
+                  🎥 Video Highlights ({playerVideos.length})
+                </h2>
+                
+                {loadingVideos ? (
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#666'}}>
+                    <div>Loading videos...</div>
+                  </div>
+                ) : playerVideos.length === 0 ? (
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#666', textAlign: 'center'}}>
+                    <div>
+                      <div style={{fontSize: 48, marginBottom: 10}}>🎥</div>
+                      <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Video Highlights</div>
+                      <div style={{fontSize: 14}}>This player has not uploaded any video highlights yet.</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{display: 'flex', flexDirection: 'column', gap: 15, overflowY: 'auto', maxHeight: '500px'}}>
+                    {playerVideos.map((video) => (
+                      <div
+                        key={video._id}
+                        style={{
+                          border: '2px solid #ffebec',
+                          borderRadius: 12,
+                          padding: 15,
+                          background: '#fafafa',
+                          boxShadow: '0 2px 8px rgba(220,20,60,0.1)'
+                        }}
+                      >
+                        <div style={{marginBottom: 10}}>
+                          <h4 style={{margin: 0, color: '#DC143C', fontSize: 16, fontWeight: 'bold'}}>{video.originalName}</h4>
+                          <p style={{margin: '5px 0', color: '#666', fontSize: 12}}>
+                            📅 Uploaded: {new Date(video.uploadDate).toLocaleDateString()}
+                          </p>
+                          {video.description && (
+                            <p style={{margin: '5px 0', color: '#555', fontSize: 14, fontStyle: 'italic'}}>{video.description}</p>
+                          )}
+                        </div>
+                        
+                        <video
+                          controls
+                          style={{
+                            width: '100%',
+                            maxHeight: 200,
+                            borderRadius: 8,
+                            background: '#000'
+                          }}
+                          src={`/uploads/video-highlights/${video.filename}`}
+                        >
+                          Your browser does not support the video tag.
+                        </video>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Match Photos Column */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', minHeight: '400px'}}>
+                <h2 style={{color: '#4b0082', fontSize: 18, marginBottom: 20, borderBottom: '2px solid #f0e8ff', paddingBottom: 10}}>
+                  📷 Match Photos ({playerPhotos.length})
+                </h2>
+                
+                {loadingPhotos ? (
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#666'}}>
+                    <div>Loading photos...</div>
+                  </div>
+                ) : playerPhotos.length === 0 ? (
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#666', textAlign: 'center'}}>
+                    <div>
+                      <div style={{fontSize: 48, marginBottom: 10}}>📷</div>
+                      <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Match Photos</div>
+                      <div style={{fontSize: 14}}>This player has not uploaded any match photos yet.</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 15, overflowY: 'auto', maxHeight: '500px'}}>
+                    {playerPhotos.map((photo) => (
+                      <div
+                        key={photo._id}
+                        style={{
+                          border: '2px solid #f0e8ff',
+                          borderRadius: 12,
+                          padding: 10,
+                          background: '#fafafa',
+                          boxShadow: '0 2px 8px rgba(75,0,130,0.1)',
+                          cursor: 'pointer',
+                          transition: 'transform 0.2s, box-shadow 0.2s'
+                        }}
+                        onClick={() => setSelectedPhoto(photo)}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.transform = 'scale(1.02)';
+                          e.currentTarget.style.boxShadow = '0 4px 16px rgba(75,0,130,0.2)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.transform = 'scale(1)';
+                          e.currentTarget.style.boxShadow = '0 2px 8px rgba(75,0,130,0.1)';
+                        }}
+                      >
+                        <img
+                          src={`/uploads/match-photos/${photo.filename}`}
+                          alt={photo.description || 'Match photo'}
+                          style={{
+                            width: '100%',
+                            height: 120,
+                            objectFit: 'cover',
+                            borderRadius: 8,
+                            marginBottom: 8
+                          }}
+                        />
+                        <div style={{fontSize: 12, color: '#666', marginBottom: 4}}>
+                          📅 {new Date(photo.matchDate).toLocaleDateString()}
+                        </div>
+                        {photo.opponent && (
+                          <div style={{fontSize: 12, color: '#4b0082', fontWeight: 'bold', marginBottom: 4}}>
+                            vs {photo.opponent}
+                          </div>
+                        )}
+                        {photo.description && (
+                          <div style={{fontSize: 11, color: '#555', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                            {photo.description}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
+              <h2 style={{color: '#228B22', fontSize: 18, marginBottom: 20, borderBottom: '2px solid #e8f5e8', paddingBottom: 10}}>
+                📝 Scout Notes ({playerNotes.length})
+              </h2>
+              
+              {/* Add Note Form */}
+              <div style={{marginBottom: 20, padding: 16, background: '#f8f9fa', borderRadius: 8, border: '1px solid #e9ecef'}}>
+                <textarea
+                  value={noteContent}
+                  onChange={(e) => setNoteContent(e.target.value)}
+                  placeholder="Add a note about this player..."
+                  style={{
+                    width: '100%',
+                    minHeight: 80,
+                    padding: 12,
+                    border: '1px solid #ddd',
+                    borderRadius: 6,
+                    fontSize: 14,
+                    fontFamily: 'inherit',
+                    resize: 'vertical'
+                  }}
+                />
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10}}>
+                  <small style={{color: '#666'}}>
+                    {noteContent.length}/1000 characters
+                  </small>
+                  <button
+                    onClick={handleAddNote}
+                    disabled={!noteContent.trim() || addingNote}
+                    style={{
+                      background: noteContent.trim() ? '#228B22' : '#ccc',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 6,
+                      padding: '8px 16px',
+                      cursor: noteContent.trim() ? 'pointer' : 'not-allowed',
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    {addingNote ? 'Adding...' : 'Add Note'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Notes List */}
+              {loadingNotes ? (
+                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666'}}>
+                  <div>Loading notes...</div>
+                </div>
+              ) : playerNotes.length === 0 ? (
+                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666', textAlign: 'center'}}>
+                  <div>
+                    <div style={{fontSize: 32, marginBottom: 10}}>📝</div>
+                    <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Notes Yet</div>
+                    <div style={{fontSize: 14}}>Add your first note about this player above.</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '400px', overflowY: 'auto'}}>
+                  {playerNotes.map((note) => (
+                    <div
+                      key={note._id}
+                      style={{
+                        border: '1px solid #e8f5e8',
+                        borderRadius: 8,
+                        padding: 16,
+                        background: '#fafafa',
+                        position: 'relative'
+                      }}
+                    >
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8}}>
+                        <div>
+                          <div style={{fontWeight: 'bold', color: '#228B22', fontSize: 14}}>
+                            👤 {note.addedBy}
+                          </div>
+                          <div style={{fontSize: 12, color: '#666'}}>
+                            📅 {new Date(note.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                        {note.addedBy === user.username && (
+                          <button
+                            onClick={() => handleDeleteNote(note._id)}
+                            style={{
+                              background: '#dc3545',
+                              color: '#fff',
+                              border: 'none',
+                              borderRadius: 4,
+                              padding: '4px 8px',
+                              cursor: 'pointer',
+                              fontSize: 12
+                            }}
+                            title="Delete this note"
+                          >
+                            🗑️
+                          </button>
+                        )}
+                      </div>
+                      <div style={{color: '#333', lineHeight: '1.5', fontSize: 14}}>
+                        {note.content}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Photo Modal */}
+            {selectedPhoto && (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(0,0,0,0.8)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#666',
-                  fontSize: 14
-                }}>
-                  {selectedPlayer.profilePicture ? (
-                    <img 
-                      src={selectedPlayer.profilePicture} 
-                      alt={selectedPlayer.name} 
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        borderRadius: 6
-                      }}
-                    />
-                  ) : (
-                    'No photo available'
-                  )}
+                  zIndex: 1000,
+                  padding: 20
+                }}
+                onClick={() => setSelectedPhoto(null)}
+              >
+                <div
+                  style={{
+                    background: '#fff',
+                    borderRadius: 12,
+                    padding: 20,
+                    maxWidth: '90vw',
+                    maxHeight: '90vh',
+                    overflow: 'auto',
+                    position: 'relative'
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <button
+                    onClick={() => setSelectedPhoto(null)}
+                    style={{
+                      position: 'absolute',
+                      top: 10,
+                      right: 10,
+                      background: '#DC143C',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: 30,
+                      height: 30,
+                      cursor: 'pointer',
+                      fontSize: 16,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                  >
+                    ×
+                  </button>
+                  
+                  <img
+                    src={`/uploads/match-photos/${selectedPhoto.filename}`}
+                    alt={selectedPhoto.description || 'Match photo'}
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '70vh',
+                      objectFit: 'contain',
+                      borderRadius: 8,
+                      marginBottom: 15
+                    }}
+                  />
+                  
+                  <div style={{color: '#333'}}>
+                    <h3 style={{margin: '0 0 10px 0', color: '#4b0082'}}>
+                      📷 Match Photo Details
+                    </h3>
+                    
+                    <div style={{marginBottom: 8}}>
+                      <strong>📅 Date:</strong> {new Date(selectedPhoto.matchDate).toLocaleDateString()}
+                    </div>
+                    
+                    {selectedPhoto.opponent && (
+                      <div style={{marginBottom: 8}}>
+                        <strong>⚽ Opponent:</strong> {selectedPhoto.opponent}
+                      </div>
+                    )}
+                    
+                    {selectedPhoto.description && (
+                      <div style={{marginBottom: 8}}>
+                        <strong>📝 Description:</strong> {selectedPhoto.description}
+                      </div>
+                    )}
+                    
+                    <div style={{fontSize: 12, color: '#666', marginTop: 10}}>
+                      Uploaded: {new Date(selectedPhoto.uploadDate).toLocaleDateString()}
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              {/* Quick Stats */}
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
-                <h3 style={{color: '#DC143C', fontSize: 16, marginBottom: 15}}>Quick Stats</h3>
-                <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-                  <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e9ecef'}}>
-                    <span style={{fontWeight: 'bold', color: '#333'}}>Position:</span>
-                    <span style={{color: '#666'}}>{selectedPlayer.position || 'N/A'}</span>
-                  </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e9ecef'}}>
-                    <span style={{fontWeight: 'bold', color: '#333'}}>Height:</span>
-                    <span style={{color: '#666'}}>{selectedPlayer.height ? `${selectedPlayer.height} cm` : 'N/A'}</span>
-                  </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #e9ecef'}}>
-                    <span style={{fontWeight: 'bold', color: '#333'}}>Weight:</span>
-                    <span style={{color: '#666'}}>{selectedPlayer.weight ? `${selectedPlayer.weight} kg` : 'N/A'}</span>
-                  </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', padding: '8px 0'}}>
-                    <span style={{fontWeight: 'bold', color: '#333'}}>Foot:</span>
-                    <span style={{color: '#666'}}>{selectedPlayer.foot || 'N/A'}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

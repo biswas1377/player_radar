@@ -21,7 +21,26 @@ const playerSchema = new mongoose.Schema({
   position: { type: String, required: true },
   club: { type: String, required: true }, // Club association
   addedBy: { type: String, required: true }, // Username of scout who added this player
-  profilePicture: { type: String, default: null } // URL or file path to profile picture
+  profilePicture: { type: String, default: null }, // URL or file path to profile picture
+  videoHighlights: [{ 
+    filename: { type: String, required: true },
+    originalName: { type: String, required: true },
+    uploadDate: { type: Date, default: Date.now },
+    description: { type: String, default: '' }
+  }], // Array of video highlights
+  matchPhotos: [{ 
+    filename: { type: String, required: true },
+    originalName: { type: String, required: true },
+    uploadDate: { type: Date, default: Date.now },
+    description: { type: String, default: '' },
+    matchDate: { type: String, default: '' },
+    opponent: { type: String, default: '' }
+  }], // Array of match photos
+  notes: [{
+    content: { type: String, required: true },
+    addedBy: { type: String, required: true }, // Scout username who added the note
+    timestamp: { type: Date, default: Date.now }
+  }] // Array of notes from scouts
 });
 
 // Model methods (handle all database operations)
@@ -72,6 +91,54 @@ playerSchema.statics.createPlayer = async function(playerData) {
 
 playerSchema.statics.deletePlayerById = async function(playerId) {
   return await this.findByIdAndDelete(playerId);
+};
+
+playerSchema.statics.addVideoHighlight = async function(username, videoData) {
+  return await this.findOneAndUpdate(
+    { name: { $regex: `^${username}$`, $options: 'i' } },
+    { $push: { videoHighlights: videoData } },
+    { new: true }
+  );
+};
+
+playerSchema.statics.removeVideoHighlight = async function(username, videoId) {
+  return await this.findOneAndUpdate(
+    { name: { $regex: `^${username}$`, $options: 'i' } },
+    { $pull: { videoHighlights: { _id: videoId } } },
+    { new: true }
+  );
+};
+
+playerSchema.statics.addMatchPhoto = async function(username, photoData) {
+  return await this.findOneAndUpdate(
+    { name: { $regex: `^${username}$`, $options: 'i' } },
+    { $push: { matchPhotos: photoData } },
+    { new: true }
+  );
+};
+
+playerSchema.statics.removeMatchPhoto = async function(username, photoId) {
+  return await this.findOneAndUpdate(
+    { name: { $regex: `^${username}$`, $options: 'i' } },
+    { $pull: { matchPhotos: { _id: photoId } } },
+    { new: true }
+  );
+};
+
+playerSchema.statics.addNote = async function(username, noteData) {
+  return await this.findOneAndUpdate(
+    { name: { $regex: `^${username}$`, $options: 'i' } },
+    { $push: { notes: noteData } },
+    { new: true }
+  );
+};
+
+playerSchema.statics.removeNote = async function(username, noteId) {
+  return await this.findOneAndUpdate(
+    { name: { $regex: `^${username}$`, $options: 'i' } },
+    { $pull: { notes: { _id: noteId } } },
+    { new: true }
+  );
 };
 
 module.exports = mongoose.model('Player', playerSchema);
