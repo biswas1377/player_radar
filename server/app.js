@@ -26,6 +26,9 @@ mongoose.connection.on('error', (err) => {
 
 var indexRouter = require('./routes/index');
 var authRouter = require('./routes/auth');
+var trialsRouter = require('./routes/trials');
+var activitiesRouter = require('./routes/activities');
+var skillEvaluationsRouter = require('./routes/skillEvaluations');
 
 var app = express();
 
@@ -44,5 +47,8 @@ app.use('/uploads/video-highlights', express.static(path.join(__dirname, 'public
 
 app.use('/', indexRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/trials', trialsRouter);
+app.use('/api/activities', activitiesRouter);
+app.use('/api/skill-evaluations', skillEvaluationsRouter);
 
 module.exports = app;

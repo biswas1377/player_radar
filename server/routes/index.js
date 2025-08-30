@@ -12,6 +12,9 @@ router.get('/', function(req, res, next) {
 // PATCH route for player to update their own profile (MUST be before GET /api/players)
 router.patch('/api/players/:name', auth, playerController.updatePlayer);
 
+// GET route for current user's player profile (MUST be before general GET /api/players)
+router.get('/api/players/me', auth, playerController.getMyProfile);
+
 // Video highlights routes (MUST be before general /api/players routes)
 router.post('/api/players/video-highlights', auth, playerController.uploadVideoHighlight, playerController.addVideoHighlight);
 router.delete('/api/players/video-highlights/:videoId', auth, playerController.deleteVideoHighlight);

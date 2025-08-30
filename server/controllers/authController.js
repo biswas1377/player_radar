@@ -3,6 +3,7 @@ const Player = require('../models/Player');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
+const { logActivity } = require('./activityController');
 
 // JWT Secret - must be set in environment variables for security
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -61,33 +62,7 @@ exports.register = async (req, res) => {
       });
     }
     
-    // If registering as player, validate player exists and connect (using Model method)
-    if (role === 'player') {
-      // Player ID is now required for player registration
-      if (!playerIDCode) {
-        return res.status(400).json({ 
-          error: 'Player ID Required',
-          message: 'Player ID is required for player registration. Please contact your scout to get your Player ID.',
-          type: 'player_id_required'
-        });
-      }
-      
-      // Find player by Player ID
-      const player = await Player.findByPlayerID(playerIDCode);
-      if (!player) {
-        return res.status(403).json({ 
-          error: 'Invalid Player ID',
-          message: `Player with ID ${playerIDCode} not found. Please check your Player ID or contact your scout.`,
-          type: 'player_id_not_found'
-        });
-      }
-      
-      // Update player's club to match user's club
-      player.club = club;
-      await player.save();
-    }
-    
-    // Create user (using Model method) - will automatically connect to player if role is 'player'
+    // Create user (using Model method) - will automatically validate and connect to player if role is 'player'
     await User.createUser({ username, password, role, club, playerIDCode });
     res.status(201).json({ 
       message: 'Registration Successful',
@@ -102,6 +77,13 @@ exports.register = async (req, res) => {
         error: 'Invalid Player ID',
         message: err.message,
         type: 'player_id_not_found'
+      });
+    }
+    if (err.message && err.message.includes('Invalid username for the provided Player ID')) {
+      return res.status(400).json({ 
+        error: 'Registration Failed',
+        message: 'Invalid username for the provided Player ID. Please use your correct player name as username.',
+        type: 'username_mismatch'
       });
     }
     res.status(500).json({ 
@@ -250,6 +232,15 @@ exports.updateProfilePicture = async (req, res) => {
     }
 
     console.log('Profile picture upload successful');
+    
+    // Log activity
+    await logActivity(
+      req.user.id,
+      'photo_uploaded',
+      'Profile Picture Updated',
+      'Uploaded a new profile picture'
+    );
+    
     res.json({ 
       message: 'Profile picture updated successfully',
       profilePicture: profilePictureUrl 

@@ -1,0 +1,6 @@
+.modal-center-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:2000;padding:20px}
+.modal-center{background:white;border-radius:10px;max-width:720px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,0.3);overflow:hidden}
+.modal-center-header{padding:16px 20px;border-bottom:1px solid #eee;background:linear-gradient(90deg,#667eea,#764ba2);color:#fff}
+.modal-center-body{padding:18px}
+.modal-actions{display:flex;gap:12px;justify-content:flex-end;margin-top:12px}
+.modal-btn{padding:8px 14px;border-radius:6px;border:none;cursor:pointer}

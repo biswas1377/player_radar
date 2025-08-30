@@ -267,7 +267,6 @@ const LoginTemplate = ({ onLogin, onRegister, isLogin, setIsLogin, error, succes
                     border: '2px solid rgba(255, 193, 7, 0.5)',
                     color: '#fff',
                     fontSize: '14px',
-                    textTransform: 'uppercase',
                     outline: 'none',
                     transition: 'border-color 0.3s',
                     boxSizing: 'border-box'
@@ -292,7 +291,6 @@ const LoginTemplate = ({ onLogin, onRegister, isLogin, setIsLogin, error, succes
                     border: '2px solid rgba(255, 193, 7, 0.5)',
                     color: '#fff',
                     fontSize: '14px',
-                    textTransform: 'uppercase',
                     outline: 'none',
                     transition: 'border-color 0.3s',
                     boxSizing: 'border-box'
@@ -342,7 +340,6 @@ const LoginTemplate = ({ onLogin, onRegister, isLogin, setIsLogin, error, succes
                       border: '2px solid rgba(255, 193, 7, 0.5)',
                       color: '#fff',
                       fontSize: '14px',
-                      textTransform: 'uppercase',
                       outline: 'none',
                       boxSizing: 'border-box'
                     }}
@@ -366,7 +363,6 @@ const LoginTemplate = ({ onLogin, onRegister, isLogin, setIsLogin, error, succes
                       border: '2px solid rgba(255, 193, 7, 0.5)',
                       color: '#fff',
                       fontSize: '14px',
-                      textTransform: 'uppercase',
                       outline: 'none',
                       boxSizing: 'border-box'
                     }}

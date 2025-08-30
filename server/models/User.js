@@ -36,6 +36,11 @@ userSchema.statics.createUser = async function(userData) {
       throw new Error(`Player with ID ${playerIDCode} not found`);
     }
     
+    // CRITICAL: Verify that the username matches the player's name
+    if (player.name.toLowerCase() !== username.toLowerCase()) {
+      throw new Error(`Invalid username for the provided Player ID. Please use your correct player name as username.`);
+    }
+    
     user.playerId = player._id;
     user.playerIDCode = playerIDCode;
     // Update player's club to match user's club

@@ -1,4 +1,6 @@
 const Player = require('../models/Player');
+const { logActivity } = require('./activityController');
+const { sendPlayerWelcomeEmail } = require('../services/emailService');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -98,9 +100,57 @@ exports.updatePlayer = async (req, res) => {
     
     res.json(player);
     
+    // Log activity after successful response
+    await logActivity(
+      req.user.id,
+      'profile_updated',
+      'Profile Updated',
+      'Updated profile information',
+      player._id,
+      req.user.club
+    );
+    
   } catch (err) {
     console.error('updatePlayer error:', err);
     res.status(500).json({ error: 'Failed to update player' });
+  }
+};
+
+// Get current user's player profile
+exports.getMyProfile = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'player') {
+      return res.status(403).json({ error: 'Only players can access their profile' });
+    }
+
+    // First try to use a direct linkage from the User document (preferred)
+    // This covers cases where the user's username does not exactly match the Player.name
+    const User = require('../models/User');
+    const userRecord = await User.findById(req.user.id).select('-password').populate('playerId');
+
+    if (userRecord && userRecord.playerId) {
+      return res.json(userRecord.playerId);
+    }
+
+    // Next, try to find by the stored playerIDCode on the user (if available)
+    if (userRecord && userRecord.playerIDCode) {
+      const playerByCode = await Player.findByPlayerID(userRecord.playerIDCode);
+      if (playerByCode) return res.json(playerByCode);
+    }
+
+    // Fallback: try the legacy username -> player.name match (case-insensitive)
+    const player = await Player.findOne({ 
+      name: { $regex: `^${req.user.username}$`, $options: 'i' } 
+    });
+
+    if (!player) {
+      return res.status(404).json({ error: 'Player profile not found' });
+    }
+
+    res.json(player);
+  } catch (err) {
+    console.error('getMyProfile error:', err);
+    res.status(500).json({ error: 'Failed to get player profile' });
   }
 };
 
@@ -193,17 +243,24 @@ exports.addPlayer = async (req, res) => {
       return res.status(400).json({ error: 'User club information missing. Please log out and log back in.' });
     }
     
-    const { name, dob, country, nationality, height, weight, foot, position, club } = req.body;
+    const { name, dob, country, nationality, height, weight, foot, position, club, email } = req.body;
     
     // Validation
-    if (!name || !position || !club) {
-      console.log('❌ Validation failed - missing fields:', { name, position, club });
-      return res.status(400).json({ error: 'Name, position, and club are required' });
+    if (!name || !position || !club || !email) {
+      console.log('❌ Validation failed - missing fields:', { name, position, club, email });
+      return res.status(400).json({ error: 'Name, position, club, and email are required' });
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Please provide a valid email address' });
     }
     
     // Prepare player data with scout information
     const playerData = {
       name,
+      email,
       dob,
       country: country || nationality || '',
       height: height !== undefined ? Number(height) : undefined,
@@ -234,8 +291,35 @@ exports.addPlayer = async (req, res) => {
     
     console.log('🔍 Final response player:', playerWithStatus);
     
+    // Log activity
+    await logActivity(
+      req.user.id,
+      'player_added',
+      'Player Added',
+      `Added ${player.name} to the database`,
+      player._id,
+      req.user.club
+    );
+
+    // Send welcome email to the player
+    try {
+      const emailResult = await sendPlayerWelcomeEmail(
+        player.email,
+        player.name,
+        player.playerID
+      );
+      
+      if (emailResult.success) {
+        console.log('✅ Welcome email sent to:', player.email);
+      } else {
+        console.log('⚠️ Failed to send welcome email:', emailResult.error);
+      }
+    } catch (emailError) {
+      console.error('❌ Email sending error:', emailError);
+      // Don't fail the player creation if email fails
+    }
+
     res.status(201).json(playerWithStatus);
-    
   } catch (err) {
     console.error('❌ Add player error:', err);
     res.status(500).json({ error: 'Failed to add player' });
@@ -269,6 +353,11 @@ exports.deletePlayer = async (req, res) => {
       return res.status(404).json({ error: 'Player not found' });
     }
     
+    // Delete all trials associated with this player
+    const Trial = require('../models/Trial');
+    const deletedTrials = await Trial.deleteMany({ player: id });
+    console.log('🗑️ Deleted trials:', deletedTrials.deletedCount);
+    
     // Also remove the player reference from any associated user and delete player accounts
     const User = require('../models/User');
     
@@ -276,11 +365,22 @@ exports.deletePlayer = async (req, res) => {
     const userDeletionResult = await User.deleteUsersByPlayer(id, deletedPlayer.name);
     console.log('🗑️ User deletion result:', userDeletionResult);
     
+    // Log activity
+    await logActivity(
+      req.user.id,
+      'player_deleted',
+      'Player Deleted',
+      `Removed ${deletedPlayer.name} from the database`,
+      null,
+      req.user.club
+    );
+    
     console.log('✅ Player deleted successfully:', deletedPlayer.name);
     res.json({ 
       message: 'Player deleted successfully', 
       player: deletedPlayer,
-      deletedUserAccounts: userDeletionResult.totalDeleted
+      deletedUserAccounts: userDeletionResult.totalDeleted,
+      deletedTrials: deletedTrials.deletedCount
     });
     
   } catch (err) {
@@ -322,6 +422,16 @@ exports.addVideoHighlight = async (req, res) => {
       message: 'Video highlight uploaded successfully',
       video: videoData
     });
+
+    // Log activity after successful response
+    await logActivity(
+      req.user.id,
+      'video_uploaded',
+      'Video Uploaded',
+      `Uploaded new video highlight: ${description || 'Untitled'}`,
+      player._id,
+      req.user.club
+    );
 
   } catch (err) {
     // Clean up uploaded file on error
@@ -368,6 +478,16 @@ exports.deleteVideoHighlight = async (req, res) => {
       message: 'Video highlight deleted successfully',
       deletedVideo: video
     });
+
+    // Log activity after successful response
+    await logActivity(
+      req.user.id,
+      'video_deleted',
+      'Video Deleted',
+      `Removed video highlight: ${video.description || 'Untitled'}`,
+      player._id,
+      req.user.club
+    );
 
   } catch (err) {
     console.error('Delete video highlight error:', err);
@@ -432,6 +552,16 @@ exports.addMatchPhoto = async (req, res) => {
       photo: photoData
     });
 
+    // Log activity after successful response
+    await logActivity(
+      req.user.id,
+      'photo_uploaded',
+      'Photo Uploaded',
+      `Uploaded new match photo: ${description || 'Untitled'}`,
+      player._id,
+      req.user.club
+    );
+
   } catch (err) {
     // Clean up uploaded file on error
     if (req.file) {
@@ -477,6 +607,16 @@ exports.deleteMatchPhoto = async (req, res) => {
       message: 'Match photo deleted successfully',
       deletedPhoto: photo
     });
+
+    // Log activity after successful response
+    await logActivity(
+      req.user.id,
+      'photo_deleted',
+      'Photo Deleted',
+      `Removed match photo: ${photo.description || 'Untitled'}`,
+      player._id,
+      req.user.club
+    );
 
   } catch (err) {
     console.error('Delete match photo error:', err);
@@ -531,6 +671,16 @@ exports.addNote = async (req, res) => {
       message: 'Note added successfully',
       note: noteData
     });
+
+    // Log activity after successful response
+    await logActivity(
+      req.user.id,
+      'note_added',
+      'Note Added',
+      `Added note for ${updatedPlayer.name}`,
+      updatedPlayer._id,
+      req.user.club
+    );
 
   } catch (err) {
     console.error('Add note error:', err);

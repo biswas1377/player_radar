@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import ModalCenter from './components/ModalCenter';
+import useModal from './hooks/useModal';
 
-function PhotoManagement({ user, onBack }) {
+function PhotoManagement({ user, onBack, onPhotoUploaded, onPhotoDeleted }) {
   const [photos, setPhotos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [enlargedPhoto, setEnlargedPhoto] = useState(null);
+  const confirmModal = useModal(false);
+  const notifyModal = useModal(false);
+  const [confirmPayload, setConfirmPayload] = useState(null);
+  const [notifyMessage, setNotifyMessage] = useState('');
 
   // Fetch existing match photos
   const fetchMatchPhotos = React.useCallback(async () => {
@@ -61,6 +67,14 @@ function PhotoManagement({ user, onBack }) {
       if (response.ok) {
         setSuccess('Photo uploaded successfully!');
         fetchMatchPhotos(); // Refresh the list
+        // Track activity
+        if (onPhotoUploaded) {
+          onPhotoUploaded({ 
+            description: descriptionInput.value || 'Untitled photo',
+            opponent: opponentInput.value || 'Unknown opponent',
+            matchDate: matchDateInput.value
+          });
+        }
         e.target.reset(); // Clear the form
       } else {
         const errorData = await response.json();
@@ -73,13 +87,19 @@ function PhotoManagement({ user, onBack }) {
     }
   };
 
-  const handleDeletePhoto = async (photoId) => {
-    if (!window.confirm('Are you sure you want to delete this photo?')) {
-      return;
-    }
+  const handleDeletePhoto = (photo) => {
+    // Open confirmation modal
+    setConfirmPayload(photo);
+    confirmModal.openModal();
+  };
+
+  const confirmDelete = async () => {
+    const photo = confirmPayload;
+    confirmModal.closeModal();
+    if (!photo) return;
 
     try {
-      const response = await fetch(`/api/players/match-photos/${photoId}`, {
+      const response = await fetch(`/api/players/match-photos/${photo._id}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -87,14 +107,31 @@ function PhotoManagement({ user, onBack }) {
       });
 
       if (response.ok) {
-        setSuccess('Photo deleted successfully!');
+        const msg = 'Photo deleted successfully!';
+        setSuccess(msg);
+        setNotifyMessage(msg);
+        notifyModal.openModal();
         fetchMatchPhotos(); // Refresh the list
+        // Track activity
+        if (onPhotoDeleted) {
+          onPhotoDeleted({
+            description: photo.description || 'Untitled photo',
+            opponent: photo.opponent || 'Unknown opponent',
+            matchDate: photo.matchDate
+          });
+        }
       } else {
         const errorData = await response.json();
-        setError(errorData.error || 'Failed to delete photo');
+        const msg = errorData.error || 'Failed to delete photo';
+        setError(msg);
+        setNotifyMessage(msg);
+        notifyModal.openModal();
       }
     } catch (err) {
-      setError('Delete failed. Please try again.');
+      const msg = 'Delete failed. Please try again.';
+      setError(msg);
+      setNotifyMessage(msg);
+      notifyModal.openModal();
     }
   };
 
@@ -455,7 +492,7 @@ function PhotoManagement({ user, onBack }) {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleDeletePhoto(photo._id);
+                            handleDeletePhoto(photo);
                           }}
                           style={{
                             background: '#f44336',
@@ -513,50 +550,63 @@ function PhotoManagement({ user, onBack }) {
             left: 0,
             width: '100%',
             height: '100%',
-            background: 'rgba(0,0,0,0.9)',
+            background: 'rgba(0,0,0,0.95)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 1000,
-            cursor: 'pointer'
+            cursor: 'pointer',
+            padding: 24,
+            boxSizing: 'border-box',
+            overflowY: 'auto'
           }} onClick={closePhotoModal}>
             <div style={{
-              maxWidth: '90%',
-              maxHeight: '90%',
-              position: 'relative'
+              maxWidth: 'calc(100vw - 48px)',
+              maxHeight: 'calc(100vh - 48px)',
+              width: 'auto',
+              height: 'auto',
+              position: 'relative',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxSizing: 'border-box'
             }}>
               <img 
                 src={enlargedPhoto} 
                 alt="Enlarged match photo" 
                 style={{
                   maxWidth: '100%',
-                  maxHeight: '100%',
+                  maxHeight: 'calc(100vh - 120px)',
+                  width: 'auto',
+                  height: 'auto',
                   objectFit: 'contain',
-                  borderRadius: '12px',
+                  borderRadius: '8px',
                   boxShadow: '0 8px 32px rgba(220,20,60,0.4)',
-                  border: '3px solid #DC143C'
+                  border: '3px solid #DC143C',
+                  display: 'block'
                 }}
                 onClick={(e) => e.stopPropagation()}
               />
               <button
                 onClick={closePhotoModal}
+                aria-label="Close enlarged photo"
                 style={{
                   position: 'absolute',
-                  top: '-15px',
-                  right: '-15px',
+                  top: '12px',
+                  right: '12px',
                   background: '#DC143C',
                   color: 'white',
                   border: 'none',
                   borderRadius: '50%',
-                  width: '35px',
-                  height: '35px',
+                  width: '44px',
+                  height: '44px',
                   cursor: 'pointer',
-                  fontSize: '18px',
+                  fontSize: '20px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 4px 8px rgba(0,0,0,0.3)',
-                  fontWeight: 'bold'
+                  boxShadow: '0 6px 16px rgba(0,0,0,0.5)',
+                  fontWeight: '700'
                 }}
               >
                 ×
@@ -564,6 +614,22 @@ function PhotoManagement({ user, onBack }) {
             </div>
           </div>
         )}
+        {/* Confirmation Modal for delete */}
+        <ModalCenter open={confirmModal.open} title="Confirm Delete" onClose={confirmModal.closeModal}>
+          <p>Are you sure you want to delete this photo? This action cannot be undone.</p>
+          <div className="modal-actions">
+            <button className="modal-btn" onClick={confirmModal.closeModal}>Cancel</button>
+            <button className="modal-btn" style={{background:'#f44336',color:'#fff'}} onClick={confirmDelete}>Delete</button>
+          </div>
+        </ModalCenter>
+
+        {/* Notification Modal for success/error */}
+        <ModalCenter open={notifyModal.open} title="Notification" onClose={notifyModal.closeModal}>
+          <div>{notifyMessage}</div>
+          <div className="modal-actions">
+            <button className="modal-btn" onClick={notifyModal.closeModal}>OK</button>
+          </div>
+        </ModalCenter>
       </div>
     </div>
   );

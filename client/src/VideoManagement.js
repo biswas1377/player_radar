@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
+import ModalCenter from './components/ModalCenter';
+import useModal from './hooks/useModal';
 
-function VideoManagement({ user, onBack }) {
+function VideoManagement({ user, onBack, onVideoUploaded, onVideoDeleted }) {
   const [videos, setVideos] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const confirmModal = useModal(false);
+  const notifyModal = useModal(false);
+  const [confirmPayload, setConfirmPayload] = useState(null);
+  const [notifyMessage, setNotifyMessage] = useState('');
 
   // Fetch existing video highlights
   const fetchVideoHighlights = React.useCallback(async () => {
@@ -56,6 +62,10 @@ function VideoManagement({ user, onBack }) {
       if (response.ok) {
         setSuccess('Video uploaded successfully!');
         fetchVideoHighlights(); // Refresh the list
+        // Track activity
+        if (onVideoUploaded) {
+          onVideoUploaded({ description: descriptionInput.value || 'Untitled' });
+        }
         e.target.reset(); // Clear the form
       } else {
         const errorData = await response.json();
@@ -68,13 +78,18 @@ function VideoManagement({ user, onBack }) {
     }
   };
 
-  const handleDeleteVideo = async (videoId) => {
-    if (!window.confirm('Are you sure you want to delete this video?')) {
-      return;
-    }
+  const handleDeleteVideo = (videoId, videoDescription) => {
+    setConfirmPayload({ videoId, videoDescription });
+    confirmModal.openModal();
+  };
+
+  const confirmDeleteVideo = async () => {
+    const payload = confirmPayload;
+    confirmModal.closeModal();
+    if (!payload) return;
 
     try {
-      const response = await fetch(`/api/players/video-highlights/${videoId}`, {
+      const response = await fetch(`/api/players/video-highlights/${payload.videoId}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -82,14 +97,24 @@ function VideoManagement({ user, onBack }) {
       });
 
       if (response.ok) {
-        setSuccess('Video deleted successfully!');
+        const msg = 'Video deleted successfully!';
+        setSuccess(msg);
+        setNotifyMessage(msg);
+        notifyModal.openModal();
         fetchVideoHighlights(); // Refresh the list
+        if (onVideoDeleted) onVideoDeleted({ videoName: payload.videoDescription || 'Untitled Video' });
       } else {
         const errorData = await response.json();
-        setError(errorData.error || 'Failed to delete video');
+        const msg = errorData.error || 'Failed to delete video';
+        setError(msg);
+        setNotifyMessage(msg);
+        notifyModal.openModal();
       }
     } catch (err) {
-      setError('Delete failed. Please try again.');
+      const msg = 'Delete failed. Please try again.';
+      setError(msg);
+      setNotifyMessage(msg);
+      notifyModal.openModal();
     }
   };
 
@@ -337,7 +362,7 @@ function VideoManagement({ user, onBack }) {
                           )}
                         </div>
                         <button
-                          onClick={() => handleDeleteVideo(video._id)}
+                          onClick={() => handleDeleteVideo(video._id, video.description)}
                           style={{
                             background: '#f44336',
                             color: 'white',
@@ -371,6 +396,21 @@ function VideoManagement({ user, onBack }) {
               )}
             </div>
           </div>
+          {/* Confirm/Notify Modals */}
+          <ModalCenter open={confirmModal.open} title="Confirm Delete" onClose={confirmModal.closeModal}>
+            <p>Are you sure you want to delete this video? This action cannot be undone.</p>
+            <div className="modal-actions">
+              <button className="modal-btn" onClick={confirmModal.closeModal}>Cancel</button>
+              <button className="modal-btn" style={{background:'#f44336',color:'#fff'}} onClick={confirmDeleteVideo}>Delete</button>
+            </div>
+          </ModalCenter>
+
+          <ModalCenter open={notifyModal.open} title="Notification" onClose={notifyModal.closeModal}>
+            <div>{notifyMessage}</div>
+            <div className="modal-actions">
+              <button className="modal-btn" onClick={notifyModal.closeModal}>OK</button>
+            </div>
+          </ModalCenter>
         </div>
       </div>
     </div>

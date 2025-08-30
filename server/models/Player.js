@@ -13,6 +13,7 @@ function generatePlayerID() {
 const playerSchema = new mongoose.Schema({
   name: { type: String, required: true },
   playerID: { type: String, unique: true, default: generatePlayerID }, // Unique player identifier
+  email: { type: String, required: true }, // Player's email address for notifications
   dob: { type: String }, // date of birth as string (can be improved)
   country: { type: String },
   height: { type: Number },

@@ -1,13 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import './App.css';
 import LoginTemplate from './LoginTemplate';
 import VideoHighlights from './VideoHighlights';
 import VideoManagement from './VideoManagement';
 import PhotoManagement from './PhotoManagement';
+import TrialScheduler from './TrialScheduler';
+import TrialCalendar from './TrialCalendar';
+import TrialNotifications from './TrialNotifications';
+import PlayerTrials from './PlayerTrials';
+import PlayerNotes from './PlayerNotes';
+import SkillEvaluationHub from './SkillEvaluationHub';
+import PlayerSkillDashboard from './PlayerSkillDashboard';
 
 function PlayerForm({ onAdd }) {
   const [form, setForm] = useState({
     name: '',
+    email: '',
     dob: '',
     nationality: '',
     height: '',
@@ -27,8 +35,15 @@ function PlayerForm({ onAdd }) {
     e.preventDefault();
     setError('');
     setSuccess('');
-    if (!form.name || !form.dob || !form.nationality || !form.height || !form.weight || !form.foot || !form.position || !form.club) {
+    if (!form.name || !form.email || !form.dob || !form.nationality || !form.height || !form.weight || !form.foot || !form.position || !form.club) {
       setError('All fields are required.');
+      return;
+    }
+    
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(form.email)) {
+      setError('Please provide a valid email address.');
       return;
     }
     try {
@@ -44,7 +59,7 @@ function PlayerForm({ onAdd }) {
       const data = await res.json();
       onAdd(data);
       setSuccess(`Player added successfully! Player ID: ${data.playerID}`);
-      setForm({ name: '', dob: '', nationality: '', height: '', weight: '', foot: '', position: '', club: '' });
+      setForm({ name: '', email: '', dob: '', nationality: '', height: '', weight: '', foot: '', position: '', club: '' });
     } catch (err) {
       setError('Failed to add player.');
     }
@@ -59,11 +74,14 @@ function PlayerForm({ onAdd }) {
           {success}
           <br />
           <small style={{ fontWeight: 'normal' }}>
-            � <strong>IMPORTANT:</strong> Give this Player ID to {form.name || 'the player'} - they'll need it to register their account.
+            📧 <strong>EMAIL SENT:</strong> {form.name || 'The player'} will receive an email with their Player ID and registration instructions.
+            <br />
+            🔑 <strong>BACKUP:</strong> Give this Player ID to {form.name || 'the player'} - they'll need it to register their account.
           </small>
         </div>
       )}
       <input name="name" placeholder="Full Name" value={form.name} onChange={handleChange} />
+      <input name="email" type="email" placeholder="Email Address" value={form.email} onChange={handleChange} />
       <input name="dob" type="date" placeholder="Date of Birth" value={form.dob} onChange={handleChange} />
       <input name="nationality" placeholder="Nationality" value={form.nationality} onChange={handleChange} />
       <input name="height" type="number" step="0.01" placeholder="Height (cm)" value={form.height} onChange={handleChange} />
@@ -104,8 +122,11 @@ function App() {
   const [sortOrder, setSortOrder] = useState('asc');
   // For player profile
   const [profile, setProfile] = useState(null);
+  const [evaluationTarget, setEvaluationTarget] = useState(null);
+  const [evaluationInitialView, setEvaluationInitialView] = useState(null);
   const [playerNotes, setPlayerNotes] = useState([]);
   const [loadingPlayerNotes, setLoadingPlayerNotes] = useState(false);
+  const [loadingProfile, setLoadingProfile] = useState(false);
   // For player edit mode
   const [editMode, setEditMode] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -122,10 +143,29 @@ function App() {
   const [uploadingPicture, setUploadingPicture] = useState(false);
   const [pictureUploadError, setPictureUploadError] = useState('');
   const [enlargedImage, setEnlargedImage] = useState(null); // For image modal
+  // For delete confirmation modal
+  const [deleteModal, setDeleteModal] = useState({ 
+    show: false, 
+    type: 'player', // 'player' or 'note'
+    playerId: null, 
+    playerName: '', 
+    noteId: null 
+  });
+  // For success/error notification modal
+  const [notificationModal, setNotificationModal] = useState({
+    show: false,
+    type: 'success', // 'success' or 'error'
+    title: '',
+    message: ''
+  });
   // For video counts in player list
   const [playerVideoCounts, setPlayerVideoCounts] = useState({});
   // For photo counts in player list
   const [playerPhotoCounts, setPlayerPhotoCounts] = useState({});
+  // For activity feed tracking
+  const [recentActivities, setRecentActivities] = useState([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [activeTrialsCount, setActiveTrialsCount] = useState(0);
 
   // Helper function to calculate age from date of birth
   const calculateAge = (dob) => {
@@ -138,6 +178,143 @@ function App() {
       age--;
     }
     return age;
+  };
+
+  // Function to add activity to the feed (now sends to backend)
+  const addActivity = async (type, title, description, targetPlayer = null) => {
+    if (!user) return;
+    
+    try {
+      const response = await fetch('/api/activities', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({
+          type,
+          title,
+          description,
+          targetPlayer
+        })
+      });
+
+      if (response.ok) {
+        // Refresh the activities after adding a new one
+        fetchRecentActivities();
+      }
+    } catch (err) {
+      console.error('Failed to add activity:', err);
+    }
+  };
+
+  // Function to fetch recent activities from backend
+  const fetchRecentActivities = useCallback(async () => {
+    if (!user) return;
+    
+    console.log('🔍 Fetching recent activities for user:', user.username, user.role);
+    setLoadingActivities(true);
+    try {
+      const response = await fetch('/api/activities/recent', {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+
+      console.log('📋 Activities API response status:', response.status);
+      
+      if (response.ok) {
+        const activities = await response.json();
+        console.log('✅ Activities received:', activities.length, activities);
+        setRecentActivities(activities);
+      } else {
+        console.log('❌ Activities API failed:', response.status, response.statusText);
+        setRecentActivities([]);
+      }
+    } catch (err) {
+      console.error('❌ Failed to fetch activities:', err);
+      setRecentActivities([]);
+    } finally {
+      setLoadingActivities(false);
+    }
+  }, [user]);
+
+  // Fetch active trials count for the dashboard (scout or player)
+  const fetchActiveTrialsCount = useCallback(async () => {
+    if (!user) {
+      setActiveTrialsCount(0);
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      let url = '/api/trials/upcoming-new';
+      if (user.role === 'scout') url = '/api/trials/scout';
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      if (!res.ok) {
+        setActiveTrialsCount(0);
+        return;
+      }
+      const data = await res.json();
+      const trialsArray = data.trials || [];
+      // Count non-cancelled trials as "active"
+      const activeCount = trialsArray.filter(t => t.status !== 'cancelled').length;
+      setActiveTrialsCount(activeCount);
+    } catch (err) {
+      console.error('Failed to fetch active trials count:', err);
+      setActiveTrialsCount(0);
+    }
+  }, [user]);
+
+  // Update active trials count when user or page changes
+  useEffect(() => {
+    if (user) fetchActiveTrialsCount();
+  }, [user, page, fetchActiveTrialsCount]);
+
+  // Fetch activities when user changes or page loads
+  useEffect(() => {
+    if (user) {
+      fetchRecentActivities();
+    } else {
+      setRecentActivities([]);
+    }
+  }, [user, fetchRecentActivities]);
+
+  // Function to get icon for activity type
+  const getActivityIcon = (type) => {
+    switch(type) {
+      case 'player_added': return { icon: 'fa-plus', color: '#28a745' };
+      case 'trial_scheduled': return { icon: 'fa-calendar', color: '#17a2b8' };
+      case 'profile_updated': return { icon: 'fa-edit', color: '#ffc107' };
+      case 'video_uploaded': return { icon: 'fa-video-camera', color: '#ff6b35' };
+      case 'video_deleted': return { icon: 'fa-trash', color: '#dc3545' };
+      case 'photo_uploaded': return { icon: 'fa-camera', color: '#8A2BE2' };
+      case 'photo_deleted': return { icon: 'fa-trash', color: '#dc3545' };
+      case 'note_added': return { icon: 'fa-file-text-o', color: '#228B22' };
+      case 'player_deleted': return { icon: 'fa-trash', color: '#dc3545' };
+      default: return { icon: 'fa-info', color: '#6c757d' };
+    }
+  };
+
+  // Function to format timestamp
+  const formatTimestamp = (timestamp) => {
+    const now = new Date();
+    const activityTime = new Date(timestamp);
+    const diffInMinutes = Math.floor((now - activityTime) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes} minute${diffInMinutes > 1 ? 's' : ''} ago`;
+    
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `${diffInHours} hour${diffInHours > 1 ? 's' : ''} ago`;
+    
+    const diffInDays = Math.floor(diffInHours / 24);
+    return `${diffInDays} day${diffInDays > 1 ? 's' : ''} ago`;
   };
 
   // Helper function to filter and sort players
@@ -247,15 +424,16 @@ function App() {
           console.log('🔍 Frontend - user.profilePicture:', data.user?.profilePicture);
           setUser(data.user);
           if (data.user && data.user.role === 'scout') setPage('scout-dashboard');
+          else if (data.user && data.user.role === 'player') setPage('player-dashboard');
           else if (data.user) setPage('list');
         })
         .catch(() => setUser(null));
     }
   }, [user]);
 
-  // Fetch players from backend whenever page is 'list' or 'scout-dashboard' and user is set
+  // Fetch players from backend for scouts only
   useEffect(() => {
-    if (user && (page === 'list' || page === 'scout-dashboard')) {
+    if (user && user.role === 'scout' && (page === 'list' || page === 'scout-dashboard')) {
       fetch('/api/players', {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`
@@ -265,10 +443,8 @@ function App() {
         .then(data => {
           setPlayers(data);
           // Fetch video and photo counts for scout users
-          if (user.role === 'scout') {
-            fetchVideoCountsForPlayers(data);
-            fetchPhotoCountsForPlayers(data);
-          }
+          fetchVideoCountsForPlayers(data);
+          fetchPhotoCountsForPlayers(data);
         })
         .catch(() => setPlayers([]));
     }
@@ -327,40 +503,58 @@ function App() {
   // Fetch player profile if user is a player
   useEffect(() => {
     if (user && user.role === 'player') {
-      fetch('/api/players', {
+      setLoadingProfile(true);
+      fetch('/api/players/me', {
         headers: {
           Authorization: `Bearer ${localStorage.getItem('token')}`
         }
       })
-        .then(res => res.ok ? res.json() : Promise.reject())
-        .then(data => {
-          const found = data.find(p => p.name.toLowerCase() === user.username.toLowerCase());
-          if (found) {
-            setProfile(found);
-            // Also fetch notes for this player
-            fetchPlayerNotes();
+        .then(res => {
+          if (res.ok) {
+            return res.json();
+          } else if (res.status === 404) {
+            // Player profile not found
+            throw new Error('PROFILE_NOT_FOUND');
           } else {
+            throw new Error('Failed to fetch profile');
+          }
+        })
+        .then(data => {
+          setProfile(data);
+          // Also fetch notes for this player
+          fetchPlayerNotes();
+        })
+        .catch((error) => {
+          console.error('Profile fetch error:', error);
+          setProfile(null);
+          setPlayerNotes([]);
+          
+          if (error.message === 'PROFILE_NOT_FOUND') {
             // Player record doesn't exist - log out the user
             console.warn('Player record not found for user:', user.username);
             localStorage.removeItem('token');
             setUser(null);
-            setProfile(null);
-            setPlayerNotes([]);
             setPage('auth');
-            alert('Your player profile has been removed. Please contact an administrator.');
+            setNotificationModal({
+              show: true,
+              type: 'error',
+              title: 'Profile Removed',
+              message: 'Your player profile has been removed. Please contact an administrator.'
+            });
+          } else {
+            // Also log out if there's an error fetching profile
+            localStorage.removeItem('token');
+            setUser(null);
+            setPage('auth');
           }
         })
-        .catch(() => {
-          setProfile(null);
-          setPlayerNotes([]);
-          // Also log out if there's an error fetching players
-          localStorage.removeItem('token');
-          setUser(null);
-          setPage('auth');
+        .finally(() => {
+          setLoadingProfile(false);
         });
     } else {
       setProfile(null);
       setPlayerNotes([]);
+      setLoadingProfile(false);
     }
   }, [user]);
 
@@ -398,48 +592,105 @@ function App() {
   const handleAddPlayer = (newPlayer) => {
     setPlayers([newPlayer, ...players]);
     setPage('list');
+    // Refresh activities to show the new player addition
+    fetchRecentActivities();
   };
 
   // Handle player deletion (scout only)
   const handleDeletePlayer = async (playerId, playerName) => {
     if (!user || user.role !== 'scout') {
-      alert('Only scouts can delete players');
+  setNotificationModal({ show: true, type: 'error', title: 'Permission Denied', message: 'Only scouts can delete players' });
       return;
     }
 
-    const confirmDelete = window.confirm(`Are you sure you want to delete ${playerName}?\n\nThis will:\n• Remove the player from the database\n• Delete their login account\n• This action cannot be undone`);
-    if (!confirmDelete) return;
+    // Show delete confirmation modal
+    setDeleteModal({ show: true, type: 'player', playerId, playerName, noteId: null });
+  };
+
+  // Confirm and execute player deletion
+  const confirmDeletePlayer = async () => {
+    const { type, playerId, playerName, noteId } = deleteModal;
+    setDeleteModal({ show: false, type: 'player', playerId: null, playerName: '', noteId: null });
 
     try {
-      const res = await fetch(`/api/players/${playerId}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`
+      if (type === 'player') {
+        // Delete player
+        const res = await fetch(`/api/players/${playerId}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+
+        if (!res.ok) {
+          const error = await res.json();
+          throw new Error(error.error || 'Failed to delete player');
         }
-      });
 
-      if (!res.ok) {
-        const error = await res.json();
-        throw new Error(error.error || 'Failed to delete player');
+        const result = await res.json();
+
+        // Remove player from local state
+        setPlayers(players.filter(player => player._id !== playerId));
+        
+        // If we're viewing this player's profile, go back to list
+        if (selectedPlayer && selectedPlayer._id === playerId) {
+          setSelectedPlayer(null);
+          setPage('list');
+        }
+
+        // Refresh activities to show the player deletion
+        fetchRecentActivities();
+
+        const accountMessage = result.deletedUserAccounts > 0 ? ` and ${result.deletedUserAccounts} user account(s)` : '';
+        setNotificationModal({
+          show: true,
+          type: 'success',
+          title: 'Player Deleted',
+          message: `${playerName} has been successfully deleted${accountMessage}.`
+        });
+      } else if (type === 'note') {
+        // Delete note
+        const response = await fetch(`/api/players/${selectedPlayer.name}/notes/${noteId}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`
+          }
+        });
+
+        if (response.ok) {
+          // Refresh notes
+          const notesResponse = await fetch(`/api/players/${selectedPlayer.name}/notes`);
+          if (notesResponse.ok) {
+            const data = await notesResponse.json();
+            setPlayerNotes(data.notes || []);
+          }
+        } else {
+          throw new Error('Failed to delete note');
+        }
       }
-
-      const result = await res.json();
-
-      // Remove player from local state
-      setPlayers(players.filter(player => player._id !== playerId));
-      
-      // If we're viewing this player's profile, go back to list
-      if (selectedPlayer && selectedPlayer._id === playerId) {
-        setSelectedPlayer(null);
-        setPage('list');
-      }
-
-      const accountMessage = result.deletedUserAccounts > 0 ? ` and ${result.deletedUserAccounts} user account(s)` : '';
-      alert(`${playerName} has been successfully deleted${accountMessage}.`);
     } catch (error) {
-      console.error('Delete player error:', error);
-      alert(`Failed to delete player: ${error.message}`);
+      console.error('Delete error:', error);
+      if (type === 'player') {
+        setNotificationModal({
+          show: true,
+          type: 'error',
+          title: 'Delete Failed',
+          message: `Failed to delete player: ${error.message}`
+        });
+      } else {
+        setNotificationModal({
+          show: true,
+          type: 'error',
+          title: 'Delete Failed',
+          message: `Failed to delete note: ${error.message}`
+        });
+      }
     }
+  };
+
+  // Cancel player deletion
+  const cancelDeletePlayer = () => {
+    setDeleteModal({ show: false, type: 'player', playerId: null, playerName: '', noteId: null });
   };
 
   // Handle profile picture upload
@@ -475,6 +726,8 @@ function App() {
       
       // Update user state with new profile picture
       setUser(prev => ({ ...prev, profilePicture: data.profilePicture }));
+      
+      // Activity logged by backend
       
       // If user is a player, also update profile
       if (user.role === 'player' && profile) {
@@ -682,41 +935,112 @@ function App() {
           </div>
           
           <div style={{flex: 1, display: 'flex', flexDirection: 'column'}}>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, minHeight: '400px', position: 'relative', zIndex: 1}}>
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 6}}>Recent Activity</div>
-                <div style={{flex: 1, display: 'flex', flexDirection: 'column', gap: 8}}>
-                  <div style={{padding: '8px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <div style={{fontWeight: 600, fontSize: 14, color: '#333'}}>Player Added</div>
-                    <div style={{fontSize: 12, color: '#666'}}>Added new player profile</div>
+            {/* Main dashboard content - 2x2 grid */}
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, minHeight: '400px', position: 'relative', zIndex: 1}}>
+              {/* Player Statistics - Enhanced */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
+                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 16, fontSize: 18}}>
+                  <i className="fa fa-users" style={{marginRight: 8}}></i>Player Statistics
+                </div>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, width: '100%'}}>
+                  <div style={{textAlign: 'center'}}>
+                    <div style={{width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(145deg, #DC143C 0%, #ff4d6d 100%)', border: '3px solid rgba(220,20,60,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, boxShadow: '0 4px 12px rgba(220,20,60,0.2)', margin: '0 auto'}}>
+                      <span style={{fontSize: 24, fontWeight: 700, color: '#fff'}}>{players.length}</span>
+                    </div>
+                    <div style={{fontSize: 12, color: '#666', fontWeight: 'bold'}}>Total Players</div>
                   </div>
-                  <div style={{padding: '8px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <div style={{fontWeight: 600, fontSize: 14, color: '#333'}}>Profile Updated</div>
-                    <div style={{fontSize: 12, color: '#666'}}>Player information updated</div>
-                  </div>
-                  <div style={{padding: '8px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <div style={{fontWeight: 600, fontSize: 14, color: '#333'}}>New Registration</div>
-                    <div style={{fontSize: 12, color: '#666'}}>Player account created</div>
+                  <div style={{textAlign: 'center'}}>
+                    <div style={{width: 80, height: 80, borderRadius: '50%', background: 'linear-gradient(145deg, #228B22 0%, #32CD32 100%)', border: '3px solid rgba(34,139,34,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, boxShadow: '0 4px 12px rgba(34,139,34,0.2)', margin: '0 auto'}}>
+                        <span style={{fontSize: 24, fontWeight: 700, color: '#fff'}}>{activeTrialsCount}</span>
+                      </div>
+                      <div style={{fontSize: 12, color: '#666', fontWeight: 'bold'}}>Active Trials</div>
                   </div>
                 </div>
               </div>
               
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Player Statistics</div>
-                <div style={{width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(145deg, #ffffff 0%, #ffebec 100%)', border: '3px solid rgba(220,20,60,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: '0 4px 12px rgba(220,20,60,0.2)'}}>
-                  <span style={{fontSize: 24, fontWeight: 700, color: '#DC143C'}}>{players.length}</span>
+              {/* Quick Actions - Enhanced */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', border: '2px solid rgba(220,20,60,0.2)'}}>
+                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 16, fontSize: 18, textAlign: 'center'}}>
+                  <i className="fa fa-bolt" style={{marginRight: 8}}></i>Quick Actions
                 </div>
-                <div style={{fontSize: 12, color: '#666', textAlign: 'center'}}>Total Players<br/>in Database</div>
-              </div>
-              
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Quick Actions</div>
-                <div style={{display: 'flex', flexDirection: 'column', gap: 8, width: '100%'}}>
-                  <button style={{background: '#DC143C', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(220,20,60,0.3)'}} onClick={() => setPage('scout-add')}>+ Add Player</button>
-                  <button style={{background: '#063672', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(6,54,114,0.3)'}} onClick={() => setPage('list')}>� Dashboard</button>
-                  <button style={{background: '#8B0000', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(139,0,0,0.3)'}}>📊 Reports</button>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, flex: 1}}>
+                  <button 
+                    style={{background: 'linear-gradient(135deg, #DC143C 0%, #ff4d6d 100%)', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 8px', fontWeight: 600, fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 12px rgba(220,20,60,0.3)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, transition: 'transform 0.2s'}} 
+                    onClick={() => setPage('scout-add')}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-plus" style={{fontSize: 20}}></i>
+                    Add Player
+                  </button>
+                  <button 
+                    style={{background: 'linear-gradient(135deg, #063672 0%, #4a90e2 100%)', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 8px', fontWeight: 600, fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 12px rgba(6,54,114,0.3)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, transition: 'transform 0.2s'}} 
+                    onClick={() => setPage('list')}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-list" style={{fontSize: 20}}></i>
+                    Players
+                  </button>
+                  <button 
+                    style={{background: 'linear-gradient(135deg, #228B22 0%, #32CD32 100%)', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 8px', fontWeight: 600, fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 12px rgba(34,139,34,0.3)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, transition: 'transform 0.2s'}} 
+                    onClick={() => setPage('trials')}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-calendar" style={{fontSize: 20}}></i>
+                    Trials
+                  </button>
+                  <button 
+                    style={{background: 'linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%)', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 8px', fontWeight: 600, fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 12px rgba(155,89,182,0.3)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, transition: 'transform 0.2s'}}
+                    onClick={() => setPage('skill-evaluations')}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-star" style={{fontSize: 20}}></i>
+                    Skill Evaluations
+                  </button>
                 </div>
               </div>
+            </div>
+            
+            {/* Recent Activity - Full width at bottom */}
+            <div style={{marginTop: 20, background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', border: '2px solid rgba(220,20,60,0.2)'}}>
+              <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 16, fontSize: 18, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 8}}>
+                <i className="fa fa-clock-o" style={{marginRight: 8}}></i>Recent Activity
+              </div>
+              {loadingActivities ? (
+                <div style={{textAlign: 'center', padding: '40px 20px', color: '#999'}}>
+                  <i className="fa fa-spinner fa-spin" style={{fontSize: 24, marginBottom: 16}}></i>
+                  <div>Loading activities...</div>
+                </div>
+              ) : recentActivities.filter(activity => activity.type !== 'note_added').length > 0 ? (
+                <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16}}>
+                  {recentActivities
+                    .filter(activity => activity.type !== 'note_added').map((activity) => {
+                    const activityStyle = getActivityIcon(activity.type);
+                    return (
+                      <div key={activity._id} style={{padding: '12px 16px', background: '#f8f9fa', borderRadius: 8, borderLeft: `4px solid ${activityStyle.color}`}}>
+                        <div style={{fontWeight: 600, fontSize: 14, color: '#333', marginBottom: 4}}>
+                          <i className={`fa ${activityStyle.icon}`} style={{marginRight: 8, color: activityStyle.color}}></i>
+                          {activity.title}
+                        </div>
+                        <div style={{fontSize: 12, color: '#666'}}>{activity.description}</div>
+                        <div style={{fontSize: 11, color: '#999', marginTop: 4, display: 'flex', justifyContent: 'space-between'}}>
+                          <span>by {activity.user?.username || 'Unknown'}</span>
+                          <span>{formatTimestamp(activity.timestamp)}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div style={{textAlign: 'center', padding: '40px 20px', color: '#999'}}>
+                  <i className="fa fa-hourglass-empty" style={{fontSize: 32, marginBottom: 16, opacity: 0.5}}></i>
+                  <div style={{fontSize: 16, fontWeight: 500}}>No recent activity</div>
+                  <div style={{fontSize: 14, marginTop: 8}}>Start by adding players or scheduling trials</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -780,6 +1104,216 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteModal.show && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1001
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '450px',
+              width: '90%',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+              border: '2px solid #DC143C'
+            }} onClick={(e) => e.stopPropagation()}>
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '25px'
+              }}>
+                <div style={{
+                  fontSize: '48px',
+                  color: '#DC143C',
+                  marginBottom: '15px'
+                }}>
+                  ⚠️
+                </div>
+                <h3 style={{
+                  color: '#DC143C',
+                  marginBottom: '10px',
+                  fontSize: '24px'
+                }}>
+                  Delete Player
+                </h3>
+                <p style={{
+                  color: '#333',
+                  fontSize: '16px',
+                  marginBottom: '20px'
+                }}>
+                  Are you sure you want to delete <strong>{deleteModal.playerName}</strong>?
+                </p>
+                <div style={{
+                  background: '#fff5f5',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  padding: '15px',
+                  textAlign: 'left',
+                  marginBottom: '20px'
+                }}>
+                  <p style={{ 
+                    color: '#DC143C', 
+                    fontWeight: 'bold', 
+                    marginBottom: '8px',
+                    fontSize: '14px' 
+                  }}>
+                    This action will:
+                  </p>
+                  <ul style={{ 
+                    color: '#666', 
+                    margin: 0, 
+                    paddingLeft: '20px',
+                    fontSize: '14px'
+                  }}>
+                    <li>Remove the player from the database</li>
+                    <li>Delete their login account</li>
+                    <li style={{ color: '#DC143C', fontWeight: 'bold' }}>This action cannot be undone</li>
+                  </ul>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex',
+                gap: '15px',
+                justifyContent: 'center'
+              }}>
+                <button
+                  onClick={cancelDeletePlayer}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#e5e7eb';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#f3f4f6';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeletePlayer}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#DC143C',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#b91c1c';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#DC143C';
+                  }}
+                >
+                  Delete Player
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Notification Modal */}
+        {notificationModal.show && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1002
+          }} onClick={() => setNotificationModal({ ...notificationModal, show: false })}>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '450px',
+              width: '90%',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+              border: `2px solid ${notificationModal.type === 'success' ? '#22c55e' : '#DC143C'}`
+            }} onClick={(e) => e.stopPropagation()}>
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '25px'
+              }}>
+                <div style={{
+                  fontSize: '48px',
+                  color: notificationModal.type === 'success' ? '#22c55e' : '#DC143C',
+                  marginBottom: '15px'
+                }}>
+                  {notificationModal.type === 'success' ? '✅' : '❌'}
+                </div>
+                <h3 style={{
+                  color: notificationModal.type === 'success' ? '#22c55e' : '#DC143C',
+                  marginBottom: '10px',
+                  fontSize: '24px'
+                }}>
+                  {notificationModal.title}
+                </h3>
+                <p style={{
+                  color: '#333',
+                  fontSize: '16px',
+                  marginBottom: '20px'
+                }}>
+                  {notificationModal.message}
+                </p>
+              </div>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center'
+              }}>
+                <button
+                  onClick={() => setNotificationModal({ ...notificationModal, show: false })}
+                  style={{
+                    padding: '12px 24px',
+                    background: notificationModal.type === 'success' ? '#22c55e' : '#DC143C',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = notificationModal.type === 'success' ? '#16a34a' : '#b91c1c';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = notificationModal.type === 'success' ? '#22c55e' : '#DC143C';
+                  }}
+                >
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -839,6 +1373,14 @@ function App() {
       <VideoManagement 
         user={user} 
         onBack={() => setPage('player-dashboard')} 
+        onVideoUploaded={(videoData) => {
+          // Activity logged by backend, refresh to show it
+          fetchRecentActivities();
+        }}
+        onVideoDeleted={(videoData) => {
+          // Activity logged by backend, refresh to show it
+          fetchRecentActivities();
+        }}
       />
     );
   }
@@ -849,6 +1391,51 @@ function App() {
       <PhotoManagement 
         user={user} 
         onBack={() => setPage('player-dashboard')} 
+        onPhotoUploaded={(photoData) => {
+          // Activity logged by backend, refresh to show it
+          fetchRecentActivities();
+        }}
+        onPhotoDeleted={(photoData) => {
+          // Activity logged by backend, refresh to show it
+          fetchRecentActivities();
+        }}
+      />
+    );
+  }
+
+  // Player Notes page (for players only)
+  if (user && user.role === 'player' && page === 'player-notes') {
+    return (
+      <PlayerNotes 
+        user={user} 
+        setPage={setPage} 
+      />
+    );
+  }
+
+  // Player Trials page (for players only)
+  if (user && user.role === 'player' && page === 'player-trials') {
+    return (
+      <PlayerTrials 
+        user={user} 
+        setPage={setPage}
+        onTrialStatusUpdated={() => {
+          // Activity logged by backend, refresh to show it
+          fetchRecentActivities();
+          fetchActiveTrialsCount();
+        }}
+      />
+    );
+  }
+
+  // Skill Evaluation Hub (for scouts only)
+  if (page === 'skill-evaluations') {
+    return (
+      <SkillEvaluationHub 
+        onBackToDashboard={() => setPage(user?.role === 'scout' ? 'scout-dashboard' : 'player-dashboard')}
+        initialPlayer={evaluationTarget}
+        initialView={evaluationInitialView}
+        user={user}
       />
     );
   }
@@ -856,6 +1443,39 @@ function App() {
   // Player profile page (for players only)
   // Player profile page (for players only)
   if (user && user.role === 'player') {
+    // Show loading state while fetching profile
+    if (loadingProfile) {
+      return (
+        <div style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#f5f5f5'
+        }}>
+          <div style={{
+            background: '#fff',
+            padding: '40px',
+            borderRadius: '8px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
+            textAlign: 'center',
+            maxWidth: '400px'
+          }}>
+            <div style={{
+              fontSize: '48px',
+              marginBottom: '20px'
+            }}>
+              ⏳
+            </div>
+            <h2 style={{color: '#333', marginBottom: '20px'}}>Loading Your Profile...</h2>
+            <p style={{color: '#666'}}>
+              Please wait while we fetch your player information.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     // Safety check: if no profile exists, log out the user
     if (!profile) {
       return (
@@ -928,6 +1548,8 @@ function App() {
         setProfile(data);
         setEditSuccess('Profile updated!');
         setEditMode(false);
+        // Activity logged by backend, refresh to show it
+        fetchRecentActivities();
       } catch (err) {
         setEditError('Failed to update profile.');
       }
@@ -1040,7 +1662,6 @@ function App() {
               <div style={{fontSize: 18, color: 'rgba(255,255,255,0.9)', marginBottom: 12}}>{profile?.position || 'Player'}</div>
               {pictureUploadError && <div style={{color: '#ffcccf', fontSize: 12, marginBottom: 8}}>{pictureUploadError}</div>}
               <div style={{display: 'flex', gap: 12, flexWrap: 'wrap'}}>
-                <button style={{background: 'rgba(255,255,255,0.9)', color: '#DC143C', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}}>Message</button>
                 <button style={{background: '#063672', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}} onClick={() => setEditMode(true)}>Edit Profile</button>
                 <button 
                   onClick={() => setPage('video-management')}
@@ -1054,7 +1675,6 @@ function App() {
                 >
                   📸 Manage Photos
                 </button>
-                <button style={{background: '#8B0000', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontWeight: 600, fontSize: 14, cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)'}}>Email</button>
               </div>
             </div>
           </div>
@@ -1104,139 +1724,235 @@ function App() {
           ) : null}
           
           <div style={{flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 1}}>
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 16, minHeight: '400px'}}>
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 6}}>Player Details</div>
-                <div style={{flex: 1, display: 'flex', flexDirection: 'column', gap: 8}}>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>Position:</span>
+            {/* Player Skill Dashboard for players to view their own evaluations */}
+            <div style={{flex: 1, overflow: 'auto', position: 'relative', zIndex: 1, marginBottom: 20}}>
+              <PlayerSkillDashboard 
+                isPlayerView={true} 
+                onOpenEvaluation={(player) => {
+                  // Set the evaluation target and navigate to skill evaluations hub
+                  setEvaluationTarget(player);
+                  // Choose initial view: scouts should go to evaluate, players to dashboard
+                  setEvaluationInitialView(user?.role === 'scout' ? 'evaluate' : 'dashboard');
+                  setPage('skill-evaluations');
+                }}
+              />
+            </div>
+            {/* Main Dashboard Grid - 2x2 layout for better visual appeal */}
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20, position: 'relative', zIndex: 1}}>
+              {/* Player Information Card - Enhanced */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', border: '2px solid rgba(220,20,60,0.2)'}}>
+                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 16, fontSize: 16, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 8}}>
+                  <i className="fa fa-user" style={{marginRight: 8}}></i>Player Information
+                </div>
+                <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#f8f9fa', borderRadius: 6}}>
+                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>
+                      <i className="fa fa-address-card" style={{marginRight: 8}}></i>Name:
+                    </span>
+                    <span style={{color: '#333', fontSize: 14, fontWeight: 'bold'}}>{profile?.name || user.username}</span>
+                  </div>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#f8f9fa', borderRadius: 6}}>
+                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>
+                      <i className="fa fa-map-marker" style={{marginRight: 8}}></i>Position:
+                    </span>
                     <span style={{color: '#333', fontSize: 14}}>{profile?.position || '-'}</span>
                   </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>Date of Birth:</span>
-                    <span style={{color: '#333', fontSize: 14}}>{profile?.dob || '-'}</span>
-                  </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>Country:</span>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#f8f9fa', borderRadius: 6}}>
+                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>
+                      <i className="fa fa-globe" style={{marginRight: 8}}></i>Country:
+                    </span>
                     <span style={{color: '#333', fontSize: 14}}>{profile?.nationality || profile?.country || '-'}</span>
                   </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>Height:</span>
-                    <span style={{color: '#333', fontSize: 14}}>{profile?.height ? profile.height + ' cm' : '-'}</span>
-                  </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(220,20,60,0.1)'}}>
-                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>Weight:</span>
-                    <span style={{color: '#333', fontSize: 14}}>{profile?.weight ? profile.weight + ' kg' : '-'}</span>
-                  </div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0'}}>
-                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>Foot:</span>
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: '#f8f9fa', borderRadius: 6}}>
+                    <span style={{fontWeight: 600, color: '#DC143C', fontSize: 14}}>
+                      <i className="fa fa-child" style={{marginRight: 8}}></i>Foot:
+                    </span>
                     <span style={{color: '#333', fontSize: 14}}>{profile?.foot || '-'}</span>
                   </div>
                 </div>
               </div>
               
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Video Highlights</div>
-                <div style={{width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(145deg, #ff6b35 0%, #ff4d20 100%)', border: '3px solid rgba(255,107,53,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: '0 4px 12px rgba(255,107,53,0.2)'}}>
-                  <span style={{fontSize: 32, color: '#fff'}}>🎥</span>
+              {/* Media & Actions - Combined */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', border: '2px solid rgba(220,20,60,0.2)'}}>
+                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 16, fontSize: 16, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 8}}>
+                  <i className="fa fa-bolt" style={{marginRight: 8}}></i>Quick Actions
                 </div>
-                <div style={{fontSize: 12, color: '#666', textAlign: 'center', marginBottom: 12}}>Showcase your skills<br/>Upload videos</div>
-                <button 
-                  onClick={() => setPage('video-management')}
-                  style={{
-                    background: '#ff6b35',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: 6,
-                    padding: '6px 12px',
-                    fontSize: 12,
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 6px rgba(255,107,53,0.3)'
-                  }}
-                >
-                  Manage Videos
-                </button>
-              </div>
-              
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Match Photos</div>
-                <div style={{width: 100, height: 100, borderRadius: '50%', background: 'linear-gradient(145deg, #8A2BE2 0%, #9A32F5 100%)', border: '3px solid rgba(138,43,226,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 12, boxShadow: '0 4px 12px rgba(138,43,226,0.2)'}}>
-                  <span style={{fontSize: 32, color: '#fff'}}>📸</span>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16}}>
+                  <button 
+                    onClick={() => setPage('video-management')}
+                    style={{
+                      background: 'linear-gradient(135deg, #ff6b35 0%, #ff4d20 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '16px 12px',
+                      fontSize: 13,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(255,107,53,0.3)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 8,
+                      transition: 'transform 0.2s'
+                    }}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-video-camera" style={{fontSize: 24}}></i>
+                    Manage Videos
+                  </button>
+                  
+                  <button 
+                    onClick={() => setPage('photo-management')}
+                    style={{
+                      background: 'linear-gradient(135deg, #8A2BE2 0%, #9A32F5 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '16px 12px',
+                      fontSize: 13,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(138,43,226,0.3)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 8,
+                      transition: 'transform 0.2s'
+                    }}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-camera" style={{fontSize: 24}}></i>
+                    Manage Photos
+                  </button>
                 </div>
-                <div style={{fontSize: 12, color: '#666', textAlign: 'center', marginBottom: 12}}>Capture match moments<br/>Upload photos</div>
-                <button 
-                  onClick={() => setPage('photo-management')}
-                  style={{
-                    background: '#8A2BE2',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: 6,
-                    padding: '6px 12px',
-                    fontSize: 12,
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
-                    boxShadow: '0 2px 6px rgba(138,43,226,0.3)'
-                  }}
-                >
-                  Manage Photos
-                </button>
-              </div>
-              
-              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 16, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', border: '2px solid rgba(220,20,60,0.2)'}}>
-                <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 12, fontSize: 16}}>Calendar & Training</div>
-                <div style={{width: 100, height: 100, background: 'linear-gradient(145deg, #ffffff 0%, #ffebec 100%)', borderRadius: 12, border: '2px solid rgba(220,20,60,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#DC143C', fontSize: 20, marginBottom: 12, boxShadow: '0 4px 12px rgba(220,20,60,0.2)'}}>
-                  📅
+                
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+                  <button 
+                    onClick={() => setPage('player-notes')}
+                    style={{
+                      background: 'linear-gradient(135deg, #228B22 0%, #32CD32 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '12px 16px',
+                      fontSize: 13,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(34,139,34,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      transition: 'transform 0.2s'
+                    }}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-sticky-note" style={{fontSize: 16}}></i>
+                    Scout Notes
+                  </button>
+                  
+                  <button 
+                    onClick={() => setPage('player-trials')}
+                    style={{
+                      background: 'linear-gradient(135deg, #FF6347 0%, #FF8C69 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '12px 16px',
+                      fontSize: 13,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(255,99,71,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      transition: 'transform 0.2s'
+                    }}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-calendar-check-o" style={{fontSize: 16}}></i>
+                    My Trials
+                  </button>
                 </div>
-                <div style={{fontSize: 12, color: '#666', textAlign: 'center'}}>Training schedule<br/>coming soon</div>
+                
+                <div style={{marginTop: 16}}>
+                  <button 
+                    onClick={() => setEditMode(true)}
+                    style={{
+                      background: 'linear-gradient(135deg, #063672 0%, #4a90e2 100%)',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      padding: '12px 20px',
+                      fontSize: 14,
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(6,54,114,0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      width: '100%',
+                      transition: 'transform 0.2s'
+                    }}
+                    onMouseOver={(e) => e.target.style.transform = 'translateY(-2px)'}
+                    onMouseOut={(e) => e.target.style.transform = 'translateY(0)'}
+                  >
+                    <i className="fa fa-edit" style={{fontSize: 18}}></i>
+                    Edit Profile
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* Notes Section for Player */}
+            {/* Activity Feed Section for Player */}
             <div style={{marginTop: 20, background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 8px 24px rgba(220,20,60,0.15)', border: '2px solid rgba(220,20,60,0.2)'}}>
-              <div style={{fontWeight: 700, color: '#228B22', marginBottom: 16, fontSize: 18, borderBottom: '2px solid rgba(34,139,34,0.2)', paddingBottom: 8}}>
-                📝 Scout Notes ({playerNotes.length})
+              <div style={{fontWeight: 700, color: '#DC143C', marginBottom: 16, fontSize: 18, borderBottom: '2px solid rgba(220,20,60,0.2)', paddingBottom: 8}}>
+                <i className="fa fa-clock-o" style={{marginRight: 8}}></i>My Activity
               </div>
-              
-              {loadingPlayerNotes ? (
-                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666'}}>
-                  <div>Loading notes...</div>
+              {loadingActivities ? (
+                <div style={{textAlign: 'center', padding: '40px 20px', color: '#999'}}>
+                  <i className="fa fa-spinner fa-spin" style={{fontSize: 24, marginBottom: 16}}></i>
+                  <div>Loading activities...</div>
                 </div>
-              ) : playerNotes.length === 0 ? (
-                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666', textAlign: 'center'}}>
-                  <div>
-                    <div style={{fontSize: 32, marginBottom: 10}}>📝</div>
-                    <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Notes Yet</div>
-                    <div style={{fontSize: 14}}>No scout has added notes about you yet.</div>
-                  </div>
-                </div>
-              ) : (
-                <div style={{display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '300px', overflowY: 'auto'}}>
-                  {playerNotes.map((note) => (
-                    <div
-                      key={note._id}
-                      style={{
-                        border: '1px solid rgba(34,139,34,0.2)',
-                        borderRadius: 8,
-                        padding: 16,
-                        background: '#fafafa'
-                      }}
-                    >
-                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8}}>
-                        <div>
-                          <div style={{fontWeight: 'bold', color: '#228B22', fontSize: 14}}>
-                            👤 Scout: {note.addedBy}
-                          </div>
-                          <div style={{fontSize: 12, color: '#666'}}>
-                            📅 {new Date(note.timestamp).toLocaleString()}
+              ) : recentActivities
+                .filter(activity => activity.type !== 'note_added')
+                .length > 0 ? (
+                <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                  {recentActivities
+                    .filter(activity => activity.type !== 'note_added')
+                    .map((activity) => {
+                      const activityStyle = getActivityIcon(activity.type);
+                      return (
+                        <div key={activity._id} style={{padding: '16px', background: '#f8f9fa', borderRadius: 8, borderLeft: `4px solid ${activityStyle.color}`, border: '1px solid #e9ecef'}}>
+                          <div style={{display: 'flex', alignItems: 'center', marginBottom: 8}}>
+                            <div style={{width: 32, height: 32, borderRadius: '50%', background: activityStyle.color, display: 'flex', alignItems: 'center', justifyContent: 'center', marginRight: 12}}>
+                              <i className={`fa ${activityStyle.icon}`} style={{fontSize: 14, color: '#fff'}}></i>
+                            </div>
+                            <div style={{flex: 1}}>
+                              <div style={{fontWeight: 600, fontSize: 14, color: '#333', marginBottom: 2}}>{activity.title}</div>
+                              <div style={{fontSize: 12, color: '#666'}}>{activity.description}</div>
+                              {activity.user && activity.user.username !== user.username && (
+                                <div style={{fontSize: 11, color: '#28a745', marginTop: 4}}>by {activity.user.username}</div>
+                              )}
+                            </div>
+                            <div style={{fontSize: 11, color: '#999', textAlign: 'right'}}>{formatTimestamp(activity.timestamp)}</div>
                           </div>
                         </div>
-                      </div>
-                      <div style={{color: '#333', lineHeight: '1.5', fontSize: 14}}>
-                        {note.content}
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
+                </div>
+              ) : (
+                <div style={{textAlign: 'center', padding: '40px 20px', color: '#999'}}>
+                  <i className="fa fa-hourglass-empty" style={{fontSize: 32, marginBottom: 16, opacity: 0.5}}></i>
+                  <div style={{fontSize: 16, fontWeight: 500}}>No recent activity</div>
+                  <div style={{fontSize: 14, marginTop: 8}}>Your recent actions will appear here</div>
                 </div>
               )}
             </div>
@@ -1302,6 +2018,181 @@ function App() {
             </div>
           </div>
         )}
+
+        {/* Delete Confirmation Modal */}
+        {deleteModal.show && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1001
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '450px',
+              width: '90%',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+              border: '2px solid #DC143C'
+            }} onClick={(e) => e.stopPropagation()}>
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '25px'
+              }}>
+                <div style={{
+                  fontSize: '48px',
+                  color: '#DC143C',
+                  marginBottom: '15px'
+                }}>
+                  ⚠️
+                </div>
+                <h3 style={{
+                  color: '#DC143C',
+                  marginBottom: '10px',
+                  fontSize: '24px'
+                }}>
+                  Delete Player
+                </h3>
+                <p style={{
+                  color: '#333',
+                  fontSize: '16px',
+                  marginBottom: '20px'
+                }}>
+                  Are you sure you want to delete <strong>{deleteModal.playerName}</strong>?
+                </p>
+                <div style={{
+                  background: '#fff5f5',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  padding: '15px',
+                  textAlign: 'left',
+                  marginBottom: '20px'
+                }}>
+                  <p style={{ 
+                    color: '#DC143C', 
+                    fontWeight: 'bold', 
+                    marginBottom: '8px',
+                    fontSize: '14px' 
+                  }}>
+                    This action will:
+                  </p>
+                  <ul style={{ 
+                    color: '#666', 
+                    margin: 0, 
+                    paddingLeft: '20px',
+                    fontSize: '14px'
+                  }}>
+                    <li>Remove the player from the database</li>
+                    <li>Delete their login account</li>
+                    <li style={{ color: '#DC143C', fontWeight: 'bold' }}>This action cannot be undone</li>
+                  </ul>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex',
+                gap: '15px',
+                justifyContent: 'center'
+              }}>
+                <button
+                  onClick={cancelDeletePlayer}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#e5e7eb';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#f3f4f6';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeletePlayer}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#DC143C',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#b91c1c';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#DC143C';
+                  }}
+                >
+                  Delete Player
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Trials management page (scout only)
+  if (user && user.role === 'scout' && page === 'trials') {
+    return (
+      <div className="football-bg" style={{
+        background: `linear-gradient(135deg, rgba(10,10,10,0.1) 60%, rgba(34,34,34,0.2) 100%), url(${process.env.PUBLIC_URL}/santi-cazorla.jpg) no-repeat center center fixed`,
+        backgroundSize: 'cover, cover',
+        minHeight: '100vh',
+        padding: 12
+      }}>
+        <div style={{background: 'linear-gradient(135deg, #ffffff 0%, #ffeff0 25%, #ffffff 50%, #fff5f5 75%, #ffffff 100%)', borderRadius: 16, boxShadow: '0 8px 32px rgba(220,20,60,0.15)', padding: 32, position: 'relative', overflow: 'hidden', minHeight: 'calc(100vh - 24px)'}}>
+          {/* Decorative background elements */}
+          <div style={{position: 'absolute', top: -30, right: -30, width: 150, height: 150, background: 'radial-gradient(circle, rgba(220,20,60,0.03) 0%, transparent 70%)', borderRadius: '50%'}}></div>
+          <div style={{position: 'absolute', bottom: -40, left: -40, width: 120, height: 120, background: 'radial-gradient(circle, rgba(6,54,114,0.02) 0%, transparent 70%)', borderRadius: '50%'}}></div>
+          
+          <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, position: 'relative', zIndex: 1}}>
+            <div style={{display: 'flex', alignItems: 'center'}}>
+              <div>
+                <h1 className="football-title" style={{margin: 0, color: '#DC143C', fontSize: 28}}>Trial Management</h1>
+                <div style={{fontSize: 14, color: '#666', marginTop: 2}}>Schedule and manage player trials</div>
+              </div>
+            </div>
+            <div style={{display: 'flex', gap: 12}}>
+              <button onClick={() => setPage('scout-dashboard')} style={{background: '#063672', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontWeight: 'bold', fontSize: 16, cursor: 'pointer'}}>← Dashboard</button>
+              <button onClick={() => setPage('list')} style={{background: '#DC143C', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 18px', fontWeight: 'bold', fontSize: 16, cursor: 'pointer', boxShadow: '0 2px 8px rgba(220,20,60,0.08)'}}>Players</button>
+              <button
+                onClick={() => {
+                  localStorage.removeItem('token');
+                  setUser(null);
+                  setPage('auth');
+                  window.location.reload();
+                }}
+                style={{background: '#f0f0f0', color: '#DC143C', border: 'none', borderRadius: 8, padding: '10px 18px', fontWeight: 'bold', fontSize: 16, cursor: 'pointer'}}>
+                Sign Out
+              </button>
+            </div>
+          </div>
+
+          <div style={{position: 'relative', zIndex: 1}}>
+            <TrialCalendar userRole={user.role} onRefreshRequested={() => fetchActiveTrialsCount()} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -1709,6 +2600,136 @@ function App() {
             </tbody>
           </table>
         </div>
+
+        {/* Delete Confirmation Modal */}
+        {deleteModal.show && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100%',
+            height: '100%',
+            background: 'rgba(0,0,0,0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1001
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '450px',
+              width: '90%',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+              border: '2px solid #DC143C'
+            }} onClick={(e) => e.stopPropagation()}>
+              <div style={{
+                textAlign: 'center',
+                marginBottom: '25px'
+              }}>
+                <div style={{
+                  fontSize: '48px',
+                  color: '#DC143C',
+                  marginBottom: '15px'
+                }}>
+                  ⚠️
+                </div>
+                <h3 style={{
+                  color: '#DC143C',
+                  marginBottom: '10px',
+                  fontSize: '24px'
+                }}>
+                  Delete Player
+                </h3>
+                <p style={{
+                  color: '#333',
+                  fontSize: '16px',
+                  marginBottom: '20px'
+                }}>
+                  Are you sure you want to delete <strong>{deleteModal.playerName}</strong>?
+                </p>
+                <div style={{
+                  background: '#fff5f5',
+                  border: '1px solid #fecaca',
+                  borderRadius: '8px',
+                  padding: '15px',
+                  textAlign: 'left',
+                  marginBottom: '20px'
+                }}>
+                  <p style={{ 
+                    color: '#DC143C', 
+                    fontWeight: 'bold', 
+                    marginBottom: '8px',
+                    fontSize: '14px' 
+                  }}>
+                    This action will:
+                  </p>
+                  <ul style={{ 
+                    color: '#666', 
+                    margin: 0, 
+                    paddingLeft: '20px',
+                    fontSize: '14px'
+                  }}>
+                    <li>Remove the player from the database</li>
+                    <li>Delete their login account</li>
+                    <li style={{ color: '#DC143C', fontWeight: 'bold' }}>This action cannot be undone</li>
+                  </ul>
+                </div>
+              </div>
+              <div style={{
+                display: 'flex',
+                gap: '15px',
+                justifyContent: 'center'
+              }}>
+                <button
+                  onClick={cancelDeletePlayer}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#f3f4f6',
+                    color: '#374151',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#e5e7eb';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#f3f4f6';
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDeletePlayer}
+                  style={{
+                    padding: '12px 24px',
+                    background: '#DC143C',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: '500',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.target.style.background = '#b91c1c';
+                  }}
+                  onMouseOut={(e) => {
+                    e.target.style.background = '#DC143C';
+                  }}
+                >
+                  Delete Player
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       </div>
     );
@@ -1822,13 +2843,14 @@ function App() {
             const data = await notesResponse.json();
             setPlayerNotes(data.notes || []);
           }
+          // Activity logged by backend
           setNoteContent('');
         } else {
-          alert('Failed to add note');
+          setNotificationModal({ show: true, type: 'error', title: 'Add Note Failed', message: 'Failed to add note' });
         }
       } catch (err) {
         console.error('Failed to add note:', err);
-        alert('Failed to add note');
+        setNotificationModal({ show: true, type: 'error', title: 'Add Note Failed', message: 'Failed to add note' });
       } finally {
         setAddingNote(false);
       }
@@ -1836,30 +2858,13 @@ function App() {
 
     // Delete a note
     const handleDeleteNote = async (noteId) => {
-      if (!confirm('Are you sure you want to delete this note?')) return;
-      
-      try {
-        const response = await fetch(`/api/players/${selectedPlayer.name}/notes/${noteId}`, {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem('token')}`
-          }
-        });
-
-        if (response.ok) {
-          // Refresh notes
-          const notesResponse = await fetch(`/api/players/${selectedPlayer.name}/notes`);
-          if (notesResponse.ok) {
-            const data = await notesResponse.json();
-            setPlayerNotes(data.notes || []);
-          }
-        } else {
-          alert('Failed to delete note');
-        }
-      } catch (err) {
-        console.error('Failed to delete note:', err);
-        alert('Failed to delete note');
-      }
+      setDeleteModal({ 
+        show: true, 
+        type: 'note', 
+        playerId: null, 
+        playerName: '', 
+        noteId: noteId 
+      });
     };
 
     return (
@@ -2056,8 +3061,21 @@ function App() {
               </div>
             </div>
 
-            {/* Bottom Row - Video Highlights and Match Photos */}
-            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20}}>
+            {/* Trial Scheduling Section */}
+            <div style={{marginBottom: 20}}>
+              <TrialScheduler 
+                playerId={selectedPlayer._id} 
+                playerName={selectedPlayer.name}
+                onTrialScheduled={(trial) => {
+                  console.log('Trial scheduled:', trial);
+                  // Activity logged by backend, refresh to show it
+                  fetchRecentActivities();
+                }}
+              />
+            </div>
+
+            {/* Bottom Row - Video Highlights, Match Photos, and Scout Notes */}
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20}}>
               {/* Video Highlights Column */}
               <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', minHeight: '400px'}}>
                 <h2 style={{color: '#DC143C', fontSize: 18, marginBottom: 20, borderBottom: '2px solid #ffebec', paddingBottom: 10}}>
@@ -2188,113 +3206,123 @@ function App() {
                   </div>
                 )}
               </div>
-            </div>
 
-            {/* Notes Section */}
-            <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)'}}>
-              <h2 style={{color: '#228B22', fontSize: 18, marginBottom: 20, borderBottom: '2px solid #e8f5e8', paddingBottom: 10}}>
-                📝 Scout Notes ({playerNotes.length})
-              </h2>
-              
-              {/* Add Note Form */}
-              <div style={{marginBottom: 20, padding: 16, background: '#f8f9fa', borderRadius: 8, border: '1px solid #e9ecef'}}>
-                <textarea
-                  value={noteContent}
-                  onChange={(e) => setNoteContent(e.target.value)}
-                  placeholder="Add a note about this player..."
-                  style={{
-                    width: '100%',
-                    minHeight: 80,
-                    padding: 12,
-                    border: '1px solid #ddd',
-                    borderRadius: 6,
-                    fontSize: 14,
-                    fontFamily: 'inherit',
-                    resize: 'vertical'
-                  }}
-                />
-                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10}}>
-                  <small style={{color: '#666'}}>
-                    {noteContent.length}/1000 characters
-                  </small>
+              {/* Scout Notes Column */}
+              <div style={{background: 'rgba(255,255,255,0.95)', borderRadius: 12, padding: 20, boxShadow: '0 4px 16px rgba(0,0,0,0.1)', minHeight: '400px'}}>
+                <h2 style={{color: '#228B22', fontSize: 18, marginBottom: 20, borderBottom: '2px solid #e8f5e8', paddingBottom: 10}}>
+                  📝 Scout Notes ({playerNotes.length})
+                </h2>
+                
+                {/* Add New Note Form */}
+                <div style={{marginBottom: 20, padding: 15, background: '#f8fdf8', border: '2px solid #e8f5e8', borderRadius: 8}}>
+                  <h3 style={{margin: '0 0 10px 0', color: '#228B22', fontSize: 16}}>✍️ Write New Note</h3>
+                  <textarea
+                    value={noteContent}
+                    onChange={(e) => setNoteContent(e.target.value)}
+                    placeholder="Enter your scouting observations about this player..."
+                    style={{
+                      width: '100%',
+                      minHeight: 100,
+                      padding: 12,
+                      border: '2px solid #d4edda',
+                      borderRadius: 6,
+                      fontSize: 14,
+                      fontFamily: 'inherit',
+                      resize: 'vertical',
+                      outline: 'none',
+                      transition: 'border-color 0.2s'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#228B22'}
+                    onBlur={(e) => e.target.style.borderColor = '#d4edda'}
+                  />
                   <button
                     onClick={handleAddNote}
                     disabled={!noteContent.trim() || addingNote}
                     style={{
+                      marginTop: 10,
                       background: noteContent.trim() ? '#228B22' : '#ccc',
                       color: '#fff',
                       border: 'none',
                       borderRadius: 6,
-                      padding: '8px 16px',
-                      cursor: noteContent.trim() ? 'pointer' : 'not-allowed',
-                      fontWeight: 'bold'
+                      padding: '10px 16px',
+                      fontSize: 14,
+                      fontWeight: 'bold',
+                      cursor: noteContent.trim() && !addingNote ? 'pointer' : 'not-allowed',
+                      opacity: addingNote ? 0.7 : 1,
+                      transition: 'all 0.2s'
                     }}
                   >
-                    {addingNote ? 'Adding...' : 'Add Note'}
+                    {addingNote ? '📝 Adding...' : '📝 Add Note'}
                   </button>
                 </div>
-              </div>
-
-              {/* Notes List */}
-              {loadingNotes ? (
-                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666'}}>
-                  <div>Loading notes...</div>
-                </div>
-              ) : playerNotes.length === 0 ? (
-                <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 100, color: '#666', textAlign: 'center'}}>
-                  <div>
-                    <div style={{fontSize: 32, marginBottom: 10}}>📝</div>
-                    <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Notes Yet</div>
-                    <div style={{fontSize: 14}}>Add your first note about this player above.</div>
+                
+                {/* Notes List */}
+                {loadingNotes ? (
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#666'}}>
+                    <div>Loading notes...</div>
                   </div>
-                </div>
-              ) : (
-                <div style={{display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '400px', overflowY: 'auto'}}>
-                  {playerNotes.map((note) => (
-                    <div
-                      key={note._id}
-                      style={{
-                        border: '1px solid #e8f5e8',
-                        borderRadius: 8,
-                        padding: 16,
-                        background: '#fafafa',
-                        position: 'relative'
-                      }}
-                    >
-                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8}}>
-                        <div>
-                          <div style={{fontWeight: 'bold', color: '#228B22', fontSize: 14}}>
-                            👤 {note.addedBy}
-                          </div>
-                          <div style={{fontSize: 12, color: '#666'}}>
-                            📅 {new Date(note.timestamp).toLocaleString()}
-                          </div>
-                        </div>
-                        {note.addedBy === user.username && (
-                          <button
-                            onClick={() => handleDeleteNote(note._id)}
-                            style={{
-                              background: '#dc3545',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: 4,
-                              padding: '4px 8px',
-                              cursor: 'pointer',
-                              fontSize: 12
-                            }}
-                            title="Delete this note"
-                          >
-                            🗑️
-                          </button>
-                        )}
-                      </div>
-                      <div style={{color: '#333', lineHeight: '1.5', fontSize: 14}}>
-                        {note.content}
-                      </div>
+                ) : playerNotes.length === 0 ? (
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200, color: '#666', textAlign: 'center'}}>
+                    <div>
+                      <div style={{fontSize: 48, marginBottom: 10}}>📝</div>
+                      <div style={{fontSize: 16, fontWeight: 'bold', marginBottom: 5}}>No Scout Notes</div>
+                      <div style={{fontSize: 14}}>Be the first to add scouting observations for this player.</div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ) : (
+                  <div style={{display: 'flex', flexDirection: 'column', gap: 15, overflowY: 'auto', maxHeight: '300px'}}>
+                    {playerNotes.map((note, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          border: '2px solid #e8f5e8',
+                          borderRadius: 12,
+                          padding: 15,
+                          background: '#fafafa',
+                          boxShadow: '0 2px 8px rgba(34,139,34,0.1)'
+                        }}
+                      >
+                        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10}}>
+                          <div>
+                            <div style={{fontWeight: 'bold', color: '#228B22', fontSize: 14}}>
+                              🕵️ {note.addedBy || 'Unknown Scout'}
+                            </div>
+                            <div style={{fontSize: 12, color: '#666'}}>
+                              📅 {new Date(note.timestamp).toLocaleDateString()} at {new Date(note.timestamp).toLocaleTimeString()}
+                            </div>
+                          </div>
+                          {note.addedBy === user.username && (
+                            <button
+                              onClick={() => handleDeleteNote(note._id)}
+                              style={{
+                                background: '#dc3545',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: 4,
+                                padding: '4px 8px',
+                                fontSize: 12,
+                                cursor: 'pointer'
+                              }}
+                              title="Delete this note"
+                            >
+                              🗑️
+                            </button>
+                          )}
+                        </div>
+                        <div style={{
+                          color: '#333',
+                          fontSize: 14,
+                          lineHeight: 1.5,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word'
+                        }}>
+                          {note.content}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Photo Modal */}
