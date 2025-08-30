@@ -124,7 +124,6 @@ const SkillEvaluationHub = ({ onBackToDashboard, initialPlayer = null, initialVi
                   <h3>{player.name}</h3>
                   <div className="player-details">
                     <span className="position">{player.position}</span>
-                    <span className="age">Age: {player.age}</span>
                     <span className="club">{player.club}</span>
                   </div>
                   
